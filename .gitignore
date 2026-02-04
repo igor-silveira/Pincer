@@ -1,0 +1,37 @@
+# Binaries
+/pincer
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / Credentials
+.env
+*.enc
+credentials/
+
+# Build
+dist/
+bin/
+
+# Database
+*.db
+*.db-wal
+*.db-shm
