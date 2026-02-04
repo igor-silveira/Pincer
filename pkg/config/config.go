@@ -1,0 +1,151 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/BurntSushi/toml"
+)
+
+type Config struct {
+	Gateway  GatewayConfig            `toml:"gateway"`
+	Agent    AgentConfig              `toml:"agent"`
+	Channels map[string]ChannelConfig `toml:"channels"`
+	Sandbox  SandboxConfig            `toml:"sandbox"`
+	Memory   MemoryConfig             `toml:"memory"`
+	Store    StoreConfig              `toml:"store"`
+	Log      LogConfig                `toml:"log"`
+}
+
+type GatewayConfig struct {
+	Bind      string `toml:"bind"`
+	Port      int    `toml:"port"`
+	AuthToken string `toml:"auth_token"`
+}
+
+type AgentConfig struct {
+	Model            string   `toml:"model"`
+	FallbackModels   []string `toml:"fallback_models"`
+	MaxContextTokens int      `toml:"max_context_tokens"`
+	ToolApproval     string   `toml:"tool_approval"`
+	SystemPrompt     string   `toml:"system_prompt"`
+}
+
+type ChannelConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Token    string `toml:"token"`
+	TokenEnv string `toml:"token_env"`
+}
+
+type SandboxConfig struct {
+	Mode          string `toml:"mode"`
+	NetworkPolicy string `toml:"network_policy"`
+	MaxTimeout    string `toml:"max_timeout"`
+}
+
+type MemoryConfig struct {
+	ImmutableKeys []string `toml:"immutable_keys"`
+	MaxVersions   int      `toml:"max_versions"`
+	VectorSearch  bool     `toml:"vector_search"`
+}
+
+type StoreConfig struct {
+	Driver string `toml:"driver"`
+	DSN    string `toml:"dsn"`
+}
+
+type LogConfig struct {
+	Level  string `toml:"level"`
+	Format string `toml:"format"`
+}
+
+func Default() *Config {
+	return &Config{
+		Gateway: GatewayConfig{
+			Bind: "loopback",
+			Port: 18789,
+		},
+		Agent: AgentConfig{
+			Model:            "claude-sonnet-4-20250514",
+			MaxContextTokens: 128000,
+			ToolApproval:     "ask",
+		},
+		Sandbox: SandboxConfig{
+			Mode:          "process",
+			NetworkPolicy: "deny",
+			MaxTimeout:    "5m",
+		},
+		Memory: MemoryConfig{
+			ImmutableKeys: []string{"identity", "core_values"},
+			MaxVersions:   100,
+		},
+		Store: StoreConfig{
+			Driver: "sqlite",
+		},
+		Log: LogConfig{
+			Level:  "info",
+			Format: "json",
+		},
+	}
+}
+
+var (
+	current *Config
+	mu      sync.RWMutex
+)
+
+func Load(path string) (*Config, error) {
+	cfg := Default()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+
+	if cfg.Store.DSN == "" {
+		cfg.Store.DSN = filepath.Join(DataDir(), "pincer.db")
+	}
+
+	mu.Lock()
+	current = cfg
+	mu.Unlock()
+
+	return cfg, nil
+}
+
+func Current() *Config {
+	mu.RLock()
+	defer mu.RUnlock()
+	if current == nil {
+		return Default()
+	}
+	return current
+}
+
+func DataDir() string {
+	if dir := os.Getenv("PINCER_DATA_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".pincer"
+	}
+	return filepath.Join(home, ".pincer")
+}
+
+func DefaultConfigPath() string {
+	return filepath.Join(DataDir(), "pincer.toml")
+}
+
+func EnsureDataDir() error {
+	return os.MkdirAll(DataDir(), 0700)
+}
