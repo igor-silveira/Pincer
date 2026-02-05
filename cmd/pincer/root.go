@@ -6,6 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const version = "0.1.0"
+
+var cfgFile string
+
 var rootCmd = &cobra.Command{
 	Use:   "pincer",
 	Short: "Pincer - a secure, high-performance AI assistant gateway",
@@ -17,13 +21,17 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.pincer/pincer.toml)")
+
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(statusCmd)
 }
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of Pincer",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("pincer v0.1.0")
+		fmt.Printf("pincer v%s\n", version)
 	},
 }
