@@ -35,9 +35,9 @@ func NewAnthropicProvider(apiKey string) (*AnthropicProvider, error) {
 	}, nil
 }
 
-func (a *AnthropicProvider) Name() string { return "anthropic" }
-
+func (a *AnthropicProvider) Name() string            { return "anthropic" }
 func (a *AnthropicProvider) SupportsStreaming() bool { return true }
+func (a *AnthropicProvider) SupportsToolUse() bool   { return true }
 
 func (a *AnthropicProvider) Models() []ModelInfo {
 	return []ModelInfo{
@@ -52,12 +52,30 @@ type anthropicRequest struct {
 	MaxTokens int                `json:"max_tokens"`
 	System    string             `json:"system,omitempty"`
 	Messages  []anthropicMessage `json:"messages"`
+	Tools     []anthropicTool    `json:"tools,omitempty"`
 	Stream    bool               `json:"stream"`
 }
 
+type anthropicTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+type anthropicContentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
@@ -76,17 +94,21 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 		MaxTokens: maxTokens,
 		System:    req.System,
 		Stream:    req.Stream,
-		Messages:  make([]anthropicMessage, 0, len(req.Messages)),
+	}
+
+	for _, t := range req.Tools {
+		apiReq.Tools = append(apiReq.Tools, anthropicTool{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+		})
 	}
 
 	for _, m := range req.Messages {
 		if m.Role == RoleSystem {
 			continue
 		}
-		apiReq.Messages = append(apiReq.Messages, anthropicMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
+		apiReq.Messages = append(apiReq.Messages, convertToAnthropicMessage(m))
 	}
 
 	body, err := json.Marshal(apiReq)
@@ -125,12 +147,88 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 	return ch, nil
 }
 
+func convertToAnthropicMessage(m ChatMessage) anthropicMessage {
+
+	if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
+		var blocks []anthropicContentBlock
+		if m.Content != "" {
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+		}
+		for _, tc := range m.ToolCalls {
+			blocks = append(blocks, anthropicContentBlock{
+				Type:  "tool_use",
+				ID:    tc.ID,
+				Name:  tc.Name,
+				Input: tc.Input,
+			})
+		}
+		return anthropicMessage{Role: m.Role, Content: blocks}
+	}
+
+	if m.Role == RoleUser && len(m.ToolResults) > 0 {
+		var blocks []anthropicContentBlock
+		for _, tr := range m.ToolResults {
+			blocks = append(blocks, anthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: tr.ToolCallID,
+				Content:   tr.Content,
+				IsError:   tr.IsError,
+			})
+		}
+		return anthropicMessage{Role: m.Role, Content: blocks}
+	}
+
+	return anthropicMessage{Role: m.Role, Content: m.Content}
+}
+
+type sseEvent struct {
+	Type         string     `json:"type"`
+	Index        int        `json:"index"`
+	ContentBlock *sseBlock  `json:"content_block,omitempty"`
+	Delta        sseDelta   `json:"delta,omitempty"`
+	Message      sseMessage `json:"message,omitempty"`
+	Usage        sseUsage   `json:"usage,omitempty"`
+}
+
+type sseBlock struct {
+	Type  string          `json:"type"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+type sseDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+}
+
+type sseMessage struct {
+	Usage sseUsage `json:"usage,omitempty"`
+}
+
+type sseUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type streamToolState struct {
+	id    string
+	name  string
+	input strings.Builder
+}
+
 func (a *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, ch chan<- ChatEvent) {
 	defer close(ch)
 	defer body.Close()
 
 	scanner := bufio.NewScanner(body)
+
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	var usage Usage
+
+	toolStates := make(map[int]*streamToolState)
 
 	for scanner.Scan() {
 		select {
@@ -152,18 +250,51 @@ func (a *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 		}
 
 		switch event.Type {
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				toolStates[event.Index] = &streamToolState{
+					id:   event.ContentBlock.ID,
+					name: event.ContentBlock.Name,
+				}
+			}
+
 		case "content_block_delta":
-			if event.Delta.Type == "text_delta" {
+			switch event.Delta.Type {
+			case "text_delta":
 				ch <- ChatEvent{Type: EventToken, Token: event.Delta.Text}
+			case "input_json_delta":
+				if ts, ok := toolStates[event.Index]; ok {
+					ts.input.WriteString(event.Delta.PartialJSON)
+				}
 			}
-		case "message_delta":
-			if event.Usage.OutputTokens > 0 {
-				usage.OutputTokens = event.Usage.OutputTokens
+
+		case "content_block_stop":
+			if ts, ok := toolStates[event.Index]; ok {
+				inputJSON := json.RawMessage(ts.input.String())
+				if len(inputJSON) == 0 {
+					inputJSON = json.RawMessage("{}")
+				}
+				ch <- ChatEvent{
+					Type: EventToolCall,
+					ToolCall: &ToolCall{
+						ID:    ts.id,
+						Name:  ts.name,
+						Input: inputJSON,
+					},
+				}
+				delete(toolStates, event.Index)
 			}
+
 		case "message_start":
 			if event.Message.Usage.InputTokens > 0 {
 				usage.InputTokens = event.Message.Usage.InputTokens
 			}
+
+		case "message_delta":
+			if event.Usage.OutputTokens > 0 {
+				usage.OutputTokens = event.Usage.OutputTokens
+			}
+
 		case "message_stop":
 			ch <- ChatEvent{Type: EventDone, Usage: &usage}
 			return
@@ -173,6 +304,11 @@ func (a *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 	if err := scanner.Err(); err != nil {
 		ch <- ChatEvent{Type: EventError, Error: err}
 	}
+}
+
+type anthropicFullResponse struct {
+	Content []anthropicContentBlock `json:"content"`
+	Usage   sseUsage                `json:"usage"`
 }
 
 func (a *AnthropicProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
@@ -186,8 +322,22 @@ func (a *AnthropicProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
 	}
 
 	for _, block := range resp.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			ch <- ChatEvent{Type: EventToken, Token: block.Text}
+		case "tool_use":
+			input := block.Input
+			if len(input) == 0 {
+				input = json.RawMessage("{}")
+			}
+			ch <- ChatEvent{
+				Type: EventToolCall,
+				ToolCall: &ToolCall{
+					ID:    block.ID,
+					Name:  block.Name,
+					Input: input,
+				},
+			}
 		}
 	}
 
@@ -198,31 +348,4 @@ func (a *AnthropicProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
 			OutputTokens: resp.Usage.OutputTokens,
 		},
 	}
-}
-
-type sseEvent struct {
-	Type    string   `json:"type"`
-	Delta   sseDelta `json:"delta,omitempty"`
-	Message struct {
-		Usage sseUsage `json:"usage,omitempty"`
-	} `json:"message,omitempty"`
-	Usage sseUsage `json:"usage,omitempty"`
-}
-
-type sseDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type sseUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-type anthropicFullResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-	Usage sseUsage `json:"usage"`
 }
