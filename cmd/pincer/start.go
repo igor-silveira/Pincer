@@ -8,7 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/config"
+	"github.com/igorsilveira/pincer/pkg/gateway"
+	"github.com/igorsilveira/pincer/pkg/llm"
+	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 	"github.com/spf13/cobra"
 )
@@ -41,11 +46,54 @@ func runStart(cmd *cobra.Command, args []string) error {
 		slog.String("bind", cfg.Gateway.Bind),
 	)
 
+	db, err := store.New(cfg.Store.DSN)
+	if err != nil {
+		return fmt.Errorf("opening store: %w", err)
+	}
+	defer db.Close()
+	logger.Info("store ready", slog.String("dsn", cfg.Store.DSN))
+
+	provider, err := llm.NewAnthropicProvider("")
+	if err != nil {
+		return fmt.Errorf("creating LLM provider: %w", err)
+	}
+	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
+
+	runtime := agent.NewRuntime(agent.RuntimeConfig{
+		Provider:     provider,
+		Store:        db,
+		Model:        cfg.Agent.Model,
+		MaxTokens:    cfg.Agent.MaxContextTokens,
+		SystemPrompt: cfg.Agent.SystemPrompt,
+	})
+
+	chat := webchat.New()
+
+	gw := gateway.New(gateway.Config{
+		Bind:    cfg.Gateway.Bind,
+		Port:    cfg.Gateway.Port,
+		Runtime: runtime,
+		Chat:    chat,
+		Logger:  logger,
+	})
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	<-ctx.Done()
-	logger.Info("shutting down")
+	ctx = telemetry.WithLogger(ctx, logger)
 
+	if err := chat.Start(ctx); err != nil {
+		return fmt.Errorf("starting webchat adapter: %w", err)
+	}
+
+	logger.Info("pincer gateway ready",
+		slog.String("url", fmt.Sprintf("http://127.0.0.1:%d", cfg.Gateway.Port)),
+	)
+
+	if err := gw.Start(ctx); err != nil {
+		return fmt.Errorf("gateway error: %w", err)
+	}
+
+	logger.Info("pincer gateway stopped")
 	return nil
 }
