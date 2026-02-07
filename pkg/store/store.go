@@ -209,3 +209,29 @@ func (s *Store) SessionTokenUsage(ctx context.Context, sessionID string) (int, e
 	).Scan(&total)
 	return total, err
 }
+
+func (s *Store) DeleteMessages(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `DELETE FROM messages WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("preparing statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, id := range ids {
+		if _, err := stmt.ExecContext(ctx, id); err != nil {
+			return fmt.Errorf("deleting message %s: %w", id, err)
+		}
+	}
+
+	return tx.Commit()
+}
