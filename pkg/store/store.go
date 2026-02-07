@@ -43,48 +43,55 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
-	return err
+	for _, stmt := range migrations {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migration failed: %w\nSQL: %s", err, stmt)
+		}
+	}
+	return nil
 }
 
-const schema = `
-CREATE TABLE IF NOT EXISTS sessions (
-    id         TEXT PRIMARY KEY,
-    agent_id   TEXT NOT NULL,
-    channel    TEXT NOT NULL,
-    peer_id    TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+var migrations = []string{
+	`CREATE TABLE IF NOT EXISTS sessions (
+	    id         TEXT PRIMARY KEY,
+	    agent_id   TEXT NOT NULL,
+	    channel    TEXT NOT NULL,
+	    peer_id    TEXT NOT NULL,
+	    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS messages (
+	    id           TEXT PRIMARY KEY,
+	    session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	    role         TEXT NOT NULL,
+	    content_type TEXT NOT NULL DEFAULT 'text',
+	    content      TEXT NOT NULL,
+	    token_count  INTEGER NOT NULL DEFAULT 0,
+	    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
+	`CREATE TABLE IF NOT EXISTS memory (
+	    id         TEXT PRIMARY KEY,
+	    agent_id   TEXT NOT NULL,
+	    key        TEXT NOT NULL,
+	    value      TEXT NOT NULL,
+	    hash       TEXT NOT NULL,
+	    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	    UNIQUE(agent_id, key)
+	)`,
+	`CREATE TABLE IF NOT EXISTS credentials (
+	    id              TEXT PRIMARY KEY,
+	    name            TEXT NOT NULL UNIQUE,
+	    encrypted_value BLOB NOT NULL,
+	    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
+}
 
-CREATE TABLE IF NOT EXISTS messages (
-    id         TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL,
-    content    TEXT NOT NULL,
-    token_count INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
-
-CREATE TABLE IF NOT EXISTS memory (
-    id         TEXT PRIMARY KEY,
-    agent_id   TEXT NOT NULL,
-    key        TEXT NOT NULL,
-    value      TEXT NOT NULL,
-    hash       TEXT NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(agent_id, key)
-);
-
-CREATE TABLE IF NOT EXISTS credentials (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL UNIQUE,
-    encrypted_value BLOB NOT NULL,
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`
+const (
+	ContentTypeText        = "text"
+	ContentTypeToolCalls   = "tool_calls"
+	ContentTypeToolResults = "tool_results"
+)
 
 type Session struct {
 	ID        string
@@ -96,12 +103,13 @@ type Session struct {
 }
 
 type Message struct {
-	ID         string
-	SessionID  string
-	Role       string
-	Content    string
-	TokenCount int
-	CreatedAt  time.Time
+	ID          string
+	SessionID   string
+	Role        string
+	ContentType string
+	Content     string
+	TokenCount  int
+	CreatedAt   time.Time
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
@@ -146,17 +154,21 @@ func (s *Store) TouchSession(ctx context.Context, id string) error {
 }
 
 func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
+	contentType := msg.ContentType
+	if contentType == "" {
+		contentType = ContentTypeText
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO messages (id, session_id, role, content, token_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.SessionID, msg.Role, msg.Content, msg.TokenCount, msg.CreatedAt,
+		`INSERT INTO messages (id, session_id, role, content_type, content, token_count, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.SessionID, msg.Role, contentType, msg.Content, msg.TokenCount, msg.CreatedAt,
 	)
 	return err
 }
 
 func (s *Store) RecentMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, role, content, token_count, created_at
+		`SELECT id, session_id, role, content_type, content, token_count, created_at
 		 FROM messages WHERE session_id = ?
 		 ORDER BY created_at DESC LIMIT ?`,
 		sessionID, limit,
@@ -169,7 +181,7 @@ func (s *Store) RecentMessages(ctx context.Context, sessionID string, limit int)
 	var msgs []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.TokenCount, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.ContentType, &m.Content, &m.TokenCount, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		msgs = append(msgs, m)
@@ -180,4 +192,20 @@ func (s *Store) RecentMessages(ctx context.Context, sessionID string, limit int)
 	}
 
 	return msgs, rows.Err()
+}
+
+func (s *Store) MessageCount(ctx context.Context, sessionID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
+	).Scan(&count)
+	return count, err
+}
+
+func (s *Store) SessionTokenUsage(ctx context.Context, sessionID string) (int, error) {
+	var total int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE session_id = ?`, sessionID,
+	).Scan(&total)
+	return total, err
 }

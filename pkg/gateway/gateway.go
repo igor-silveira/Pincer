@@ -16,19 +16,21 @@ import (
 )
 
 type Gateway struct {
-	server  *http.Server
-	router  *chi.Mux
-	runtime *agent.Runtime
-	chat    *webchat.Adapter
-	logger  *slog.Logger
+	server   *http.Server
+	router   *chi.Mux
+	runtime  *agent.Runtime
+	chat     *webchat.Adapter
+	approver *agent.Approver
+	logger   *slog.Logger
 }
 
 type Config struct {
-	Bind    string
-	Port    int
-	Runtime *agent.Runtime
-	Chat    *webchat.Adapter
-	Logger  *slog.Logger
+	Bind     string
+	Port     int
+	Runtime  *agent.Runtime
+	Chat     *webchat.Adapter
+	Approver *agent.Approver
+	Logger   *slog.Logger
 }
 
 func New(cfg Config) *Gateway {
@@ -42,10 +44,11 @@ func New(cfg Config) *Gateway {
 	r.Use(middleware.RealIP)
 
 	g := &Gateway{
-		router:  r,
-		runtime: cfg.Runtime,
-		chat:    cfg.Chat,
-		logger:  cfg.Logger,
+		router:   r,
+		runtime:  cfg.Runtime,
+		chat:     cfg.Chat,
+		approver: cfg.Approver,
+		logger:   cfg.Logger,
 	}
 
 	g.registerRoutes()

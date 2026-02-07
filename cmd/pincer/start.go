@@ -9,10 +9,12 @@ import (
 	"syscall"
 
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
+	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 	"github.com/spf13/cobra"
@@ -59,9 +61,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
 
+	sb := sandbox.NewProcessSandbox(config.DataDir())
+	registry := tools.DefaultRegistry()
+	logger.Info("tool sandbox ready",
+		slog.String("mode", cfg.Sandbox.Mode),
+		slog.Int("tools", len(registry.Definitions())),
+	)
+
+	approvalMode := agent.ApprovalMode(cfg.Agent.ToolApproval)
+	approver := agent.NewApprover(approvalMode, nil)
+
 	runtime := agent.NewRuntime(agent.RuntimeConfig{
 		Provider:     provider,
 		Store:        db,
+		Registry:     registry,
+		Sandbox:      sb,
+		Approver:     approver,
 		Model:        cfg.Agent.Model,
 		MaxTokens:    cfg.Agent.MaxContextTokens,
 		SystemPrompt: cfg.Agent.SystemPrompt,
@@ -70,11 +85,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 	chat := webchat.New()
 
 	gw := gateway.New(gateway.Config{
-		Bind:    cfg.Gateway.Bind,
-		Port:    cfg.Gateway.Port,
-		Runtime: runtime,
-		Chat:    chat,
-		Logger:  logger,
+		Bind:     cfg.Gateway.Bind,
+		Port:     cfg.Gateway.Port,
+		Runtime:  runtime,
+		Chat:     chat,
+		Approver: approver,
+		Logger:   logger,
 	})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -88,6 +104,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	logger.Info("pincer gateway ready",
 		slog.String("url", fmt.Sprintf("http://127.0.0.1:%d", cfg.Gateway.Port)),
+		slog.String("tool_approval", string(approvalMode)),
 	)
 
 	if err := gw.Start(ctx); err != nil {

@@ -16,13 +16,18 @@ type wsIncoming struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id,omitempty"`
 	Content   string `json:"content"`
+	RequestID string `json:"request_id,omitempty"`
+	Approved  *bool  `json:"approved,omitempty"`
 }
 
 type wsOutgoing struct {
 	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
+	SessionID string `json:"session_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	Error     string `json:"error,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+	ToolInput string `json:"tool_input,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +93,16 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if incoming.Type == "approval_response" && incoming.RequestID != "" && incoming.Approved != nil {
+			if g.approver != nil {
+				g.approver.Respond(agent.ApprovalResponse{
+					RequestID: incoming.RequestID,
+					Approved:  *incoming.Approved,
+				})
+			}
+			continue
+		}
+
 		if incoming.Content == "" {
 			continue
 		}
@@ -109,6 +124,26 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					Type:      "token",
 					SessionID: sessionID,
 					Content:   ev.Token,
+				})
+			case agent.TurnToolCall:
+				wsjson.Write(ctx, conn, wsOutgoing{
+					Type:      "tool_call",
+					SessionID: sessionID,
+					ToolName:  ev.ToolCall.Name,
+					ToolInput: string(ev.ToolCall.Input),
+				})
+			case agent.TurnToolResult:
+				wsjson.Write(ctx, conn, wsOutgoing{
+					Type:      "tool_result",
+					SessionID: sessionID,
+				})
+			case agent.TurnApprovalNeeded:
+				wsjson.Write(ctx, conn, wsOutgoing{
+					Type:      "approval_request",
+					SessionID: sessionID,
+					RequestID: ev.ApprovalRequest.ID,
+					ToolName:  ev.ApprovalRequest.ToolName,
+					ToolInput: ev.ApprovalRequest.Input,
 				})
 			case agent.TurnDone:
 				wsjson.Write(ctx, conn, wsOutgoing{
