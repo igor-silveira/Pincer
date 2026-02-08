@@ -13,6 +13,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Gateway struct {
@@ -67,6 +68,7 @@ func New(cfg Config) *Gateway {
 func (g *Gateway) registerRoutes() {
 	g.router.Get("/healthz", g.handleHealthz)
 	g.router.Get("/readyz", g.handleReadyz)
+	g.router.Handle("/metrics", promhttp.Handler())
 	g.router.Get("/", g.handleWebChatPage)
 	g.router.Get("/ws", g.handleWebSocket)
 }
