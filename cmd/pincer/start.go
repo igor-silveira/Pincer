@@ -10,6 +10,10 @@ import (
 
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/channels"
+	"github.com/igorsilveira/pincer/pkg/channels/discord"
+	slackadapter "github.com/igorsilveira/pincer/pkg/channels/slack"
+	"github.com/igorsilveira/pincer/pkg/channels/telegram"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/gateway"
@@ -82,7 +86,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 		SystemPrompt: cfg.Agent.SystemPrompt,
 	})
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx = telemetry.WithLogger(ctx, logger)
+
 	chat := webchat.New()
+	if err := chat.Start(ctx); err != nil {
+		return fmt.Errorf("starting webchat adapter: %w", err)
+	}
+
+	var channelAdapters []channels.Adapter
+	channelAdapters = append(channelAdapters, initChannelAdapters(ctx, cfg, logger)...)
+
+	if len(channelAdapters) > 0 {
+		router := gateway.NewChannelRouter(runtime, channelAdapters, logger)
+		router.Start(ctx)
+	}
 
 	gw := gateway.New(gateway.Config{
 		Bind:     cfg.Gateway.Bind,
@@ -93,18 +112,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		Logger:   logger,
 	})
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	ctx = telemetry.WithLogger(ctx, logger)
-
-	if err := chat.Start(ctx); err != nil {
-		return fmt.Errorf("starting webchat adapter: %w", err)
-	}
-
 	logger.Info("pincer gateway ready",
 		slog.String("url", fmt.Sprintf("http://127.0.0.1:%d", cfg.Gateway.Port)),
 		slog.String("tool_approval", string(approvalMode)),
+		slog.Int("channel_adapters", len(channelAdapters)),
 	)
 
 	if err := gw.Start(ctx); err != nil {
@@ -113,4 +124,69 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	logger.Info("pincer gateway stopped")
 	return nil
+}
+
+func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.Logger) []channels.Adapter {
+	var adapters []channels.Adapter
+
+	if channelEnabled(cfg, "telegram") || os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
+		token := channelToken(cfg, "telegram")
+		tg, err := telegram.New(token)
+		if err != nil {
+			logger.Warn("telegram adapter skipped", slog.String("err", err.Error()))
+		} else if err := tg.Start(ctx); err != nil {
+			logger.Error("telegram adapter failed to start", slog.String("err", err.Error()))
+		} else {
+			logger.Info("telegram adapter enabled")
+			adapters = append(adapters, tg)
+		}
+	}
+
+	if channelEnabled(cfg, "discord") || os.Getenv("DISCORD_BOT_TOKEN") != "" {
+		token := channelToken(cfg, "discord")
+		dc, err := discord.New(token)
+		if err != nil {
+			logger.Warn("discord adapter skipped", slog.String("err", err.Error()))
+		} else if err := dc.Start(ctx); err != nil {
+			logger.Error("discord adapter failed to start", slog.String("err", err.Error()))
+		} else {
+			logger.Info("discord adapter enabled")
+			adapters = append(adapters, dc)
+		}
+	}
+
+	if channelEnabled(cfg, "slack") || os.Getenv("SLACK_BOT_TOKEN") != "" {
+		botToken := channelToken(cfg, "slack")
+		appToken := os.Getenv("SLACK_APP_TOKEN")
+		sl, err := slackadapter.New(botToken, appToken)
+		if err != nil {
+			logger.Warn("slack adapter skipped", slog.String("err", err.Error()))
+		} else if err := sl.Start(ctx); err != nil {
+			logger.Error("slack adapter failed to start", slog.String("err", err.Error()))
+		} else {
+			logger.Info("slack adapter enabled")
+			adapters = append(adapters, sl)
+		}
+	}
+
+	return adapters
+}
+
+func channelEnabled(cfg *config.Config, name string) bool {
+	ch, ok := cfg.Channels[name]
+	return ok && ch.Enabled
+}
+
+func channelToken(cfg *config.Config, name string) string {
+	ch, ok := cfg.Channels[name]
+	if !ok {
+		return ""
+	}
+	if ch.Token != "" {
+		return ch.Token
+	}
+	if ch.TokenEnv != "" {
+		return os.Getenv(ch.TokenEnv)
+	}
+	return ""
 }
