@@ -38,6 +38,10 @@ func New(dsn string) (*Store, error) {
 	return s, nil
 }
 
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }

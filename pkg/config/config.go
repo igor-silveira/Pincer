@@ -10,13 +10,16 @@ import (
 )
 
 type Config struct {
-	Gateway  GatewayConfig            `toml:"gateway"`
-	Agent    AgentConfig              `toml:"agent"`
-	Channels map[string]ChannelConfig `toml:"channels"`
-	Sandbox  SandboxConfig            `toml:"sandbox"`
-	Memory   MemoryConfig             `toml:"memory"`
-	Store    StoreConfig              `toml:"store"`
-	Log      LogConfig                `toml:"log"`
+	Gateway     GatewayConfig            `toml:"gateway"`
+	Agent       AgentConfig              `toml:"agent"`
+	Channels    map[string]ChannelConfig `toml:"channels"`
+	Sandbox     SandboxConfig            `toml:"sandbox"`
+	Memory      MemoryConfig             `toml:"memory"`
+	Store       StoreConfig              `toml:"store"`
+	Log         LogConfig                `toml:"log"`
+	Tracing     TracingConfig            `toml:"tracing"`
+	Skills      SkillsConfig             `toml:"skills"`
+	Credentials CredentialsConfig        `toml:"credentials"`
 }
 
 type GatewayConfig struct {
@@ -59,6 +62,20 @@ type StoreConfig struct {
 type LogConfig struct {
 	Level  string `toml:"level"`
 	Format string `toml:"format"`
+}
+
+type TracingConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Endpoint string `toml:"endpoint"`
+}
+
+type SkillsConfig struct {
+	Dir           string `toml:"dir"`
+	AllowUnsigned bool   `toml:"allow_unsigned"`
+}
+
+type CredentialsConfig struct {
+	MasterKeyEnv string `toml:"master_key_env"`
 }
 
 func Default() *Config {

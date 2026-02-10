@@ -6,19 +6,24 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/channels/discord"
 	slackadapter "github.com/igorsilveira/pincer/pkg/channels/slack"
 	"github.com/igorsilveira/pincer/pkg/channels/telegram"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/config"
+	"github.com/igorsilveira/pincer/pkg/credentials"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
+	"github.com/igorsilveira/pincer/pkg/memory"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
+	"github.com/igorsilveira/pincer/pkg/skills"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 	"github.com/spf13/cobra"
@@ -52,6 +57,24 @@ func runStart(cmd *cobra.Command, args []string) error {
 		slog.String("bind", cfg.Gateway.Bind),
 	)
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx = telemetry.WithLogger(ctx, logger)
+
+	shutdownTracer, err := telemetry.InitTracer(ctx, telemetry.TracerConfig{
+		Enabled:     cfg.Tracing.Enabled,
+		Endpoint:    cfg.Tracing.Endpoint,
+		ServiceName: "pincer",
+		Version:     version,
+	})
+	if err != nil {
+		return fmt.Errorf("initializing tracer: %w", err)
+	}
+	defer shutdownTracer(context.Background())
+	if cfg.Tracing.Enabled {
+		logger.Info("opentelemetry tracing enabled", slog.String("endpoint", cfg.Tracing.Endpoint))
+	}
+
 	db, err := store.New(cfg.Store.DSN)
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
@@ -59,16 +82,68 @@ func runStart(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	logger.Info("store ready", slog.String("dsn", cfg.Store.DSN))
 
-	provider, err := llm.NewAnthropicProvider("")
+	auditLog, err := audit.New(db.DB())
+	if err != nil {
+		return fmt.Errorf("initializing audit logger: %w", err)
+	}
+	logger.Info("audit logger ready")
+
+	mem := memory.New(db.DB(), cfg.Memory.ImmutableKeys)
+	logger.Info("memory system ready",
+		slog.Int("immutable_keys", len(cfg.Memory.ImmutableKeys)),
+	)
+
+	masterKeyEnv := cfg.Credentials.MasterKeyEnv
+	if masterKeyEnv == "" {
+		masterKeyEnv = "PINCER_MASTER_KEY"
+	}
+	masterKey := os.Getenv(masterKeyEnv)
+	var credStore *credentials.Store
+	if masterKey != "" {
+		credStore, err = credentials.New(db.DB(), masterKey)
+		if err != nil {
+			return fmt.Errorf("initializing credential store: %w", err)
+		}
+		logger.Info("credential store ready")
+	} else {
+		logger.Warn("credential store disabled (set PINCER_MASTER_KEY to enable)")
+	}
+
+	provider, err := createProvider(cfg, logger)
 	if err != nil {
 		return fmt.Errorf("creating LLM provider: %w", err)
 	}
 	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
 
-	sb := sandbox.NewProcessSandbox(config.DataDir())
+	sb, err := createSandbox(cfg)
+	if err != nil {
+		return fmt.Errorf("creating sandbox: %w", err)
+	}
+	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
+
 	registry := tools.DefaultRegistry()
-	logger.Info("tool sandbox ready",
-		slog.String("mode", cfg.Sandbox.Mode),
+
+	skillDir := cfg.Skills.Dir
+	if skillDir == "" {
+		skillDir = filepath.Join(config.DataDir(), "skills")
+	}
+	engine := skills.NewEngine(skills.EngineConfig{
+		SkillDir:      skillDir,
+		AllowUnsigned: cfg.Skills.AllowUnsigned,
+	})
+	results, err := engine.LoadAll()
+	if err != nil {
+		logger.Warn("skill loading had errors", slog.String("err", err.Error()))
+	}
+	for _, r := range results {
+		logger.Info("skill loaded",
+			slog.String("skill", r.SkillName),
+			slog.Bool("safe", r.Safe),
+			slog.Int("findings", len(r.Findings)),
+		)
+	}
+	logger.Info("skill engine ready",
+		slog.Int("skills", len(engine.List())),
 		slog.Int("tools", len(registry.Definitions())),
 	)
 
@@ -86,9 +161,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		SystemPrompt: cfg.Agent.SystemPrompt,
 	})
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	ctx = telemetry.WithLogger(ctx, logger)
+	_ = auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
+		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
+
+	_ = mem
+	_ = credStore
 
 	chat := webchat.New()
 	if err := chat.Start(ctx); err != nil {
@@ -124,6 +201,40 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	logger.Info("pincer gateway stopped")
 	return nil
+}
+
+func createProvider(cfg *config.Config, logger *slog.Logger) (llm.Provider, error) {
+	model := cfg.Agent.Model
+
+	switch {
+	case hasPrefix(model, "claude-"):
+		return llm.NewAnthropicProvider("")
+	case hasPrefix(model, "gpt-") || hasPrefix(model, "o3-") || hasPrefix(model, "o4-"):
+		return llm.NewOpenAIProvider("", "")
+	case hasPrefix(model, "gemini-"):
+		return llm.NewGeminiProvider("")
+	case hasPrefix(model, "ollama/"):
+		return llm.NewOllamaProvider("", model[len("ollama/"):])
+	default:
+
+		logger.Info("defaulting to anthropic provider", slog.String("model", model))
+		return llm.NewAnthropicProvider("")
+	}
+}
+
+func createSandbox(cfg *config.Config) (sandbox.Sandbox, error) {
+	switch cfg.Sandbox.Mode {
+	case "container":
+		return sandbox.NewContainerSandbox(sandbox.ContainerConfig{
+			WorkDir: config.DataDir(),
+		})
+	default:
+		return sandbox.NewProcessSandbox(config.DataDir()), nil
+	}
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.Logger) []channels.Adapter {
