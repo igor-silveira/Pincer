@@ -3,10 +3,11 @@ package channels
 import "context"
 
 type InboundMessage struct {
-	ChannelName string
-	SessionID   string
-	PeerID      string
-	Content     string
+	ChannelName      string
+	SessionID        string
+	PeerID           string
+	Content          string
+	ApprovalResponse *InboundApprovalResponse
 }
 
 type OutboundMessage struct {
@@ -18,6 +19,22 @@ type ChannelCaps struct {
 	SupportsStreaming bool
 	SupportsMedia     bool
 	SupportsReactions bool
+}
+
+type ApprovalRequest struct {
+	RequestID string
+	SessionID string
+	ToolName  string
+	Input     string
+}
+
+type InboundApprovalResponse struct {
+	RequestID string
+	Approved  bool
+}
+
+type ApprovalSender interface {
+	SendApprovalRequest(ctx context.Context, req ApprovalRequest) error
 }
 
 type Adapter interface {
