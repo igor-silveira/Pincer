@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
@@ -125,6 +126,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
 
 	registry := tools.DefaultRegistry()
+	registry.Register(&tools.MemoryTool{Memory: mem})
+	if credStore != nil {
+		registry.Register(&tools.CredentialTool{Credentials: credStore})
+	}
 
 	skillDir := cfg.Skills.Dir
 	if skillDir == "" {
@@ -144,7 +149,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 			slog.Bool("safe", r.Safe),
 			slog.Int("findings", len(r.Findings)),
 		)
+		_ = auditLog.Log(ctx, audit.EventSkillLoad, "", "", "system",
+			fmt.Sprintf("skill=%s safe=%v findings=%d", r.SkillName, r.Safe, len(r.Findings)))
 	}
+
+	systemPrompt := cfg.Agent.SystemPrompt
+	for _, sk := range engine.List() {
+		if sk.Prompt != "" {
+			systemPrompt += "\n\n" + sk.Prompt
+		}
+	}
+
 	logger.Info("skill engine ready",
 		slog.Int("skills", len(engine.List())),
 		slog.Int("tools", len(registry.Definitions())),
@@ -154,25 +169,27 @@ func runStart(cmd *cobra.Command, args []string) error {
 	approver := agent.NewApprover(approvalMode, nil)
 
 	runtime := agent.NewRuntime(agent.RuntimeConfig{
-		Provider:     provider,
-		Store:        db,
-		Registry:     registry,
-		Sandbox:      sb,
-		Approver:     approver,
-		Model:        cfg.Agent.Model,
-		MaxTokens:    cfg.Agent.MaxContextTokens,
-		SystemPrompt: cfg.Agent.SystemPrompt,
+		Provider:      provider,
+		Store:         db,
+		Registry:      registry,
+		Sandbox:       sb,
+		Approver:      approver,
+		Model:         cfg.Agent.Model,
+		MaxTokens:     cfg.Agent.MaxContextTokens,
+		SystemPrompt:  systemPrompt,
+		Memory:        mem,
+		Audit:         auditLog,
+		DefaultPolicy: buildDefaultPolicy(cfg),
 	})
 
 	_ = auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
 		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
 
-	_ = mem
-	_ = credStore
-
 	webhookSecret := os.Getenv("PINCER_WEBHOOK_SECRET")
 	webhooks := scheduler.NewWebhookHandler(webhookSecret)
-	_ = webhooks
+
+	sched := scheduler.New()
+	go sched.Start(ctx)
 
 	chat := webchat.New()
 	if err := chat.Start(ctx); err != nil {
@@ -188,12 +205,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	gw := gateway.New(gateway.Config{
-		Bind:     cfg.Gateway.Bind,
-		Port:     cfg.Gateway.Port,
-		Runtime:  runtime,
-		Chat:     chat,
-		Approver: approver,
-		Logger:   logger,
+		Bind:      cfg.Gateway.Bind,
+		Port:      cfg.Gateway.Port,
+		Runtime:   runtime,
+		Chat:      chat,
+		Approver:  approver,
+		Logger:    logger,
+		Webhooks:  webhooks,
+		AuthToken: cfg.Gateway.AuthToken,
 	})
 
 	logger.Info("pincer gateway ready",
@@ -331,4 +350,25 @@ func channelToken(cfg *config.Config, name string) string {
 		return os.Getenv(ch.TokenEnv)
 	}
 	return ""
+}
+
+func buildDefaultPolicy(cfg *config.Config) sandbox.Policy {
+	p := sandbox.DefaultPolicy()
+
+	if cfg.Sandbox.MaxTimeout != "" {
+		if d, err := time.ParseDuration(cfg.Sandbox.MaxTimeout); err == nil {
+			p.Timeout = d
+		}
+	}
+
+	switch cfg.Sandbox.NetworkPolicy {
+	case "allow":
+		p.NetworkAccess = sandbox.NetworkAllow
+	case "allowlist":
+		p.NetworkAccess = sandbox.NetworkAllowList
+	case "deny":
+		p.NetworkAccess = sandbox.NetworkDeny
+	}
+
+	return p
 }
