@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+*.db
+*.db-wal
+*.db-shm
+*.md
+!go.mod
+!go.sum
+.idea
+.vscode
+dist
+bin
+Dockerfile
+.dockerignore
