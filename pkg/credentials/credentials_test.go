@@ -135,3 +135,59 @@ func TestWrongKeyCannotDecrypt(t *testing.T) {
 		t.Fatal("expected decryption error with wrong key")
 	}
 }
+
+func TestUpsertUpdatesEncryptedValue(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, "test-key")
+	ctx := context.Background()
+
+	s.Set(ctx, "token", "old-value")
+	s.Set(ctx, "token", "new-value")
+
+	val, err := s.Get(ctx, "token")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if val != "new-value" {
+		t.Errorf("Get = %q, want %q", val, "new-value")
+	}
+
+	var count int64
+	db.Model(&Credential{}).Where("name = ?", "token").Count(&count)
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (upsert should not create duplicates)", count)
+	}
+}
+
+func TestListEmpty(t *testing.T) {
+	s, _ := New(testDB(t), "test-key")
+	ctx := context.Background()
+
+	names, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("len = %d, want 0", len(names))
+	}
+}
+
+func TestListAfterDelete(t *testing.T) {
+	s, _ := New(testDB(t), "test-key")
+	ctx := context.Background()
+
+	s.Set(ctx, "keep", "val1")
+	s.Set(ctx, "remove", "val2")
+	s.Delete(ctx, "remove")
+
+	names, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(names) != 1 {
+		t.Fatalf("len = %d, want 1", len(names))
+	}
+	if names[0] != "keep" {
+		t.Errorf("remaining = %q, want %q", names[0], "keep")
+	}
+}

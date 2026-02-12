@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func testStore(t *testing.T) *Store {
@@ -199,5 +202,155 @@ func TestDBAccessor(t *testing.T) {
 	s := testStore(t)
 	if s.DB() == nil {
 		t.Fatal("DB() returned nil")
+	}
+}
+
+func TestGetSessionNotFound(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	_, err := s.GetSession(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("expected gorm.ErrRecordNotFound, got: %v", err)
+	}
+}
+
+func TestFindSessionNotFound(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	_, err := s.FindSession(ctx, "x", "y", "z")
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("expected gorm.ErrRecordNotFound, got: %v", err)
+	}
+}
+
+func TestTouchSession(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	original := time.Now().UTC().Add(-time.Minute)
+	sess := &Session{
+		ID: "touch-1", AgentID: "a", Channel: "c", PeerID: "p",
+		CreatedAt: original, UpdatedAt: original,
+	}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := s.TouchSession(ctx, "touch-1"); err != nil {
+		t.Fatalf("TouchSession: %v", err)
+	}
+
+	got, err := s.GetSession(ctx, "touch-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if !got.UpdatedAt.After(original) {
+		t.Errorf("UpdatedAt not advanced: got %v, original %v", got.UpdatedAt, original)
+	}
+}
+
+func TestCreateDuplicateSession(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	sess := &Session{
+		ID: "dup-1", AgentID: "a", Channel: "c", PeerID: "p",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+
+	dup := &Session{
+		ID: "dup-1", AgentID: "b", Channel: "d", PeerID: "q",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.CreateSession(ctx, dup); err == nil {
+		t.Fatal("expected error for duplicate primary key")
+	}
+}
+
+func TestDeleteMessagesEmpty(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	if err := s.DeleteMessages(ctx, nil); err != nil {
+		t.Errorf("DeleteMessages(nil): %v", err)
+	}
+	if err := s.DeleteMessages(ctx, []string{}); err != nil {
+		t.Errorf("DeleteMessages(empty): %v", err)
+	}
+}
+
+func TestDeleteMessagesNonExistent(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	if err := s.DeleteMessages(ctx, []string{"nonexistent-id"}); err != nil {
+		t.Errorf("DeleteMessages(nonexistent): %v", err)
+	}
+}
+
+func TestRecentMessagesEmpty(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	sess := &Session{
+		ID: "empty-msgs", AgentID: "a", Channel: "c", PeerID: "p",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	s.CreateSession(ctx, sess)
+
+	msgs, err := s.RecentMessages(ctx, "empty-msgs", 10)
+	if err != nil {
+		t.Fatalf("RecentMessages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("len = %d, want 0", len(msgs))
+	}
+}
+
+func TestSessionTokenUsageEmpty(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	total, err := s.SessionTokenUsage(ctx, "nonexistent-session")
+	if err != nil {
+		t.Fatalf("SessionTokenUsage: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("total = %d, want 0", total)
+	}
+}
+
+func TestAppendMessageDefaultContentType(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	sess := &Session{
+		ID: "ct-sess", AgentID: "a", Channel: "c", PeerID: "p",
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	s.CreateSession(ctx, sess)
+
+	s.AppendMessage(ctx, &Message{
+		ID: "ct-msg", SessionID: "ct-sess", Role: "user", Content: "hello",
+		CreatedAt: time.Now().UTC(),
+	})
+
+	msgs, _ := s.RecentMessages(ctx, "ct-sess", 1)
+	if len(msgs) != 1 {
+		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+	if msgs[0].ContentType != ContentTypeText {
+		t.Errorf("ContentType = %q, want %q", msgs[0].ContentType, ContentTypeText)
 	}
 }

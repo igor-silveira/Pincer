@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,5 +157,122 @@ func TestDelete(t *testing.T) {
 	_, err := s.Get(ctx, "agent-1", "temp")
 	if err == nil {
 		t.Error("expected error after delete")
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	s := New(testDB(t), nil)
+	ctx := context.Background()
+
+	_, err := s.Get(ctx, "agent-1", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent key")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestSetUpsertUpdatesValue(t *testing.T) {
+	db := testDB(t)
+	s := New(db, nil)
+	ctx := context.Background()
+
+	s.Set(ctx, "agent-1", "key", "value-1")
+	s.Set(ctx, "agent-1", "key", "value-2")
+
+	e, err := s.Get(ctx, "agent-1", "key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if e.Value != "value-2" {
+		t.Errorf("Value = %q, want %q", e.Value, "value-2")
+	}
+
+	var count int64
+	db.Model(&Entry{}).Where("agent_id = ? AND key = ?", "agent-1", "key").Count(&count)
+	if count != 1 {
+		t.Errorf("row count = %d, want 1 (upsert should not create duplicates)", count)
+	}
+}
+
+func TestDeleteNotFound(t *testing.T) {
+	s := New(testDB(t), nil)
+	ctx := context.Background()
+
+	err := s.Delete(ctx, "agent-1", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent key")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestListEmpty(t *testing.T) {
+	s := New(testDB(t), nil)
+	ctx := context.Background()
+
+	entries, err := s.List(ctx, "agent-nobody")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("len = %d, want 0", len(entries))
+	}
+}
+
+func TestSearchNoMatch(t *testing.T) {
+	s := New(testDB(t), nil)
+	ctx := context.Background()
+
+	s.Set(ctx, "agent-1", "greeting", "Hello world")
+
+	results, err := s.Search(ctx, "agent-1", "zzzznotmatchable")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("len = %d, want 0", len(results))
+	}
+}
+
+func TestDiffNoChanges(t *testing.T) {
+	s := New(testDB(t), nil)
+	ctx := context.Background()
+
+	s.Set(ctx, "agent-1", "key", "value")
+
+	future := time.Now().UTC().Add(time.Hour)
+	entries, err := s.Diff(ctx, "agent-1", future)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("len = %d, want 0", len(entries))
+	}
+}
+
+func TestSetPreservesHash(t *testing.T) {
+	db := testDB(t)
+	s := New(db, nil)
+	ctx := context.Background()
+
+	s.Set(ctx, "agent-1", "key", "same-value")
+	e1, _ := s.Get(ctx, "agent-1", "key")
+	hash1 := e1.Hash
+
+	s.Set(ctx, "agent-1", "key", "same-value")
+	e2, _ := s.Get(ctx, "agent-1", "key")
+	hash2 := e2.Hash
+
+	if hash1 != hash2 {
+		t.Errorf("hash changed for same value: %q vs %q", hash1, hash2)
+	}
+
+	s.Set(ctx, "agent-1", "key", "different-value")
+	e3, _ := s.Get(ctx, "agent-1", "key")
+	if e3.Hash == hash1 {
+		t.Error("hash should differ for different value")
 	}
 }
