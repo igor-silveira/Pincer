@@ -51,9 +51,10 @@ type Runtime struct {
 	registry      *tools.Registry
 	sandbox       sandbox.Sandbox
 	approver      *Approver
-	model         string
-	maxTokens     int
-	systemPrompt  string
+	model           string
+	maxTokens       int
+	maxOutputTokens int
+	systemPrompt    string
 	memory        *memory.Store
 	audit         *audit.Logger
 	defaultPolicy sandbox.Policy
@@ -68,9 +69,10 @@ type RuntimeConfig struct {
 	Registry      *tools.Registry
 	Sandbox       sandbox.Sandbox
 	Approver      *Approver
-	Model         string
-	MaxTokens     int
-	SystemPrompt  string
+	Model           string
+	MaxTokens       int
+	MaxOutputTokens int
+	SystemPrompt    string
 	Memory        *memory.Store
 	Audit         *audit.Logger
 	DefaultPolicy sandbox.Policy
@@ -78,20 +80,24 @@ type RuntimeConfig struct {
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 4096
+		cfg.MaxTokens = 128000
+	}
+	if cfg.MaxOutputTokens <= 0 {
+		cfg.MaxOutputTokens = 4096
 	}
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = defaultSystemPrompt
 	}
 	return &Runtime{
-		provider:      cfg.Provider,
-		store:         cfg.Store,
-		registry:      cfg.Registry,
-		sandbox:       cfg.Sandbox,
-		approver:      cfg.Approver,
-		model:         cfg.Model,
-		maxTokens:     cfg.MaxTokens,
-		systemPrompt:  cfg.SystemPrompt,
+		provider:        cfg.Provider,
+		store:           cfg.Store,
+		registry:        cfg.Registry,
+		sandbox:         cfg.Sandbox,
+		approver:        cfg.Approver,
+		model:           cfg.Model,
+		maxTokens:       cfg.MaxTokens,
+		maxOutputTokens: cfg.MaxOutputTokens,
+		systemPrompt:    cfg.SystemPrompt,
 		memory:        cfg.Memory,
 		audit:         cfg.Audit,
 		defaultPolicy: cfg.DefaultPolicy,
@@ -167,7 +173,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			Model:     r.model,
 			System:    systemPrompt,
 			Messages:  chatMessages,
-			MaxTokens: r.maxTokens,
+			MaxTokens: r.maxOutputTokens,
 			Stream:    true,
 			Tools:     toolDefs,
 		})
