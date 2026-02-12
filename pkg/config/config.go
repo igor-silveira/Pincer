@@ -20,6 +20,7 @@ type Config struct {
 	Tracing     TracingConfig            `toml:"tracing"`
 	Skills      SkillsConfig             `toml:"skills"`
 	Credentials CredentialsConfig        `toml:"credentials"`
+	Soul        SoulConfig               `toml:"soul"`
 }
 
 type GatewayConfig struct {
@@ -76,6 +77,10 @@ type SkillsConfig struct {
 
 type CredentialsConfig struct {
 	MasterKeyEnv string `toml:"master_key_env"`
+}
+
+type SoulConfig struct {
+	Path string `toml:"path"`
 }
 
 func Default() *Config {

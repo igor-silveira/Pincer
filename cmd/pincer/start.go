@@ -28,6 +28,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/scheduler"
 	"github.com/igorsilveira/pincer/pkg/skills"
+	"github.com/igorsilveira/pincer/pkg/soul"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 	"github.com/spf13/cobra"
@@ -113,6 +114,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 		logger.Warn("credential store disabled (set PINCER_MASTER_KEY to enable)")
 	}
 
+	soulPath := cfg.Soul.Path
+	if soulPath == "" {
+		soulPath = filepath.Join(config.DataDir(), "soul.toml")
+	}
+	soulDef, err := soul.Load(soulPath)
+	if err != nil {
+		return fmt.Errorf("loading soul: %w", err)
+	}
+	if err := soulDef.SeedMemory(ctx, mem, "default"); err != nil {
+		logger.Warn("soul memory seeding had errors", slog.String("err", err.Error()))
+	}
+	logger.Info("soul loaded",
+		slog.String("name", soulDef.Identity.Name),
+		slog.String("role", soulDef.Identity.Role),
+	)
+
 	provider, err := createProvider(cfg, logger)
 	if err != nil {
 		return fmt.Errorf("creating LLM provider: %w", err)
@@ -127,6 +144,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	registry := tools.DefaultRegistry()
 	registry.Register(&tools.MemoryTool{Memory: mem})
+	registry.Register(&tools.SoulTool{Soul: soulDef})
 	if credStore != nil {
 		registry.Register(&tools.CredentialTool{Credentials: credStore})
 	}
@@ -153,7 +171,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("skill=%s safe=%v findings=%d", r.SkillName, r.Safe, len(r.Findings)))
 	}
 
-	systemPrompt := cfg.Agent.SystemPrompt
+	systemPrompt := soulDef.Render()
+	if cfg.Agent.SystemPrompt != "" {
+		systemPrompt += "\n" + cfg.Agent.SystemPrompt
+	}
 	for _, sk := range engine.List() {
 		if sk.Prompt != "" {
 			systemPrompt += "\n\n" + sk.Prompt
