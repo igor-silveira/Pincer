@@ -14,15 +14,18 @@ import (
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/channels/discord"
+	"github.com/igorsilveira/pincer/pkg/channels/matrix"
 	slackadapter "github.com/igorsilveira/pincer/pkg/channels/slack"
 	"github.com/igorsilveira/pincer/pkg/channels/telegram"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
+	"github.com/igorsilveira/pincer/pkg/channels/whatsapp"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/credentials"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/memory"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
+	"github.com/igorsilveira/pincer/pkg/scheduler"
 	"github.com/igorsilveira/pincer/pkg/skills"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -167,6 +170,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	_ = mem
 	_ = credStore
 
+	webhookSecret := os.Getenv("PINCER_WEBHOOK_SECRET")
+	webhooks := scheduler.NewWebhookHandler(webhookSecret)
+	_ = webhooks
+
 	chat := webchat.New()
 	if err := chat.Start(ctx); err != nil {
 		return fmt.Errorf("starting webchat adapter: %w", err)
@@ -277,6 +284,30 @@ func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.L
 		} else {
 			logger.Info("slack adapter enabled")
 			adapters = append(adapters, sl)
+		}
+	}
+
+	if channelEnabled(cfg, "whatsapp") || os.Getenv("WHATSAPP_DB_PATH") != "" {
+		wa, err := whatsapp.New("")
+		if err != nil {
+			logger.Warn("whatsapp adapter skipped", slog.String("err", err.Error()))
+		} else if err := wa.Start(ctx); err != nil {
+			logger.Error("whatsapp adapter failed to start", slog.String("err", err.Error()))
+		} else {
+			logger.Info("whatsapp adapter enabled")
+			adapters = append(adapters, wa)
+		}
+	}
+
+	if channelEnabled(cfg, "matrix") || os.Getenv("MATRIX_HOMESERVER") != "" {
+		mx, err := matrix.New(matrix.Config{})
+		if err != nil {
+			logger.Warn("matrix adapter skipped", slog.String("err", err.Error()))
+		} else if err := mx.Start(ctx); err != nil {
+			logger.Error("matrix adapter failed to start", slog.String("err", err.Error()))
+		} else {
+			logger.Info("matrix adapter enabled")
+			adapters = append(adapters, mx)
 		}
 	}
 
