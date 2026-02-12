@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -113,5 +114,88 @@ func TestQueryTimeRange(t *testing.T) {
 	entries, _ = l.Query(ctx, Filter{Until: before})
 	if len(entries) != 0 {
 		t.Errorf("before event: len = %d, want 0", len(entries))
+	}
+}
+
+func TestQueryOrdering(t *testing.T) {
+	l := testLogger(t)
+	ctx := context.Background()
+
+	l.Log(ctx, EventToolExec, "s1", "a1", "user", "first")
+	time.Sleep(10 * time.Millisecond)
+	l.Log(ctx, EventToolExec, "s1", "a1", "user", "second")
+	time.Sleep(10 * time.Millisecond)
+	l.Log(ctx, EventToolExec, "s1", "a1", "user", "third")
+
+	entries, err := l.Query(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("len = %d, want 3", len(entries))
+	}
+	if entries[0].Detail != "third" {
+		t.Errorf("entries[0].Detail = %q, want %q (DESC order)", entries[0].Detail, "third")
+	}
+	if entries[2].Detail != "first" {
+		t.Errorf("entries[2].Detail = %q, want %q", entries[2].Detail, "first")
+	}
+}
+
+func TestQueryCombinedFilters(t *testing.T) {
+	l := testLogger(t)
+	ctx := context.Background()
+
+	l.Log(ctx, EventToolExec, "s1", "a1", "user", "match")
+	l.Log(ctx, EventMemorySet, "s1", "a1", "agent", "wrong type")
+	l.Log(ctx, EventToolExec, "s2", "a2", "user", "wrong session")
+
+	entries, err := l.Query(ctx, Filter{EventType: EventToolExec, SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len = %d, want 1", len(entries))
+	}
+	if entries[0].Detail != "match" {
+		t.Errorf("Detail = %q, want %q", entries[0].Detail, "match")
+	}
+}
+
+func TestAutoMigrateIdempotent(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	})
+
+	if _, err := New(db); err != nil {
+		t.Fatalf("first New: %v", err)
+	}
+	if _, err := New(db); err != nil {
+		t.Fatalf("second New: %v", err)
+	}
+}
+
+func TestQueryNoLimit(t *testing.T) {
+	l := testLogger(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		l.Log(ctx, EventToolExec, "", "", "", fmt.Sprintf("event-%d", i))
+	}
+
+	entries, err := l.Query(ctx, Filter{Limit: 0})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Errorf("len = %d, want 5", len(entries))
 	}
 }

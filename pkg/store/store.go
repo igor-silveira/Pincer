@@ -15,7 +15,7 @@ type Store struct {
 }
 
 func New(dsn string) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dsn+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open(dsn+"?_journal_mode=WAL&_foreign_keys=on"), &gorm.Config{
 		Logger: logger.Discard,
 	})
 	if err != nil {
