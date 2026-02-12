@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/channels"
@@ -12,13 +14,15 @@ import (
 type ChannelRouter struct {
 	runtime  *agent.Runtime
 	adapters []channels.Adapter
+	approver *agent.Approver
 	logger   *slog.Logger
 }
 
-func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, logger *slog.Logger) *ChannelRouter {
+func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger) *ChannelRouter {
 	return &ChannelRouter{
 		runtime:  runtime,
 		adapters: adapters,
+		approver: approver,
 		logger:   logger,
 	}
 }
@@ -38,6 +42,20 @@ func (cr *ChannelRouter) listenAdapter(ctx context.Context, adapter channels.Ada
 		case msg, ok := <-ch:
 			if !ok {
 				return
+			}
+			if msg.ApprovalResponse != nil {
+				cr.approver.Respond(agent.ApprovalResponse{
+					RequestID: msg.ApprovalResponse.RequestID,
+					Approved:  msg.ApprovalResponse.Approved,
+				})
+				continue
+			}
+			if resp, ok := parseTextApproval(msg.Content); ok {
+				cr.approver.Respond(agent.ApprovalResponse{
+					RequestID: resp.RequestID,
+					Approved:  resp.Approved,
+				})
+				continue
 			}
 			go cr.handleMessage(ctx, adapter, msg)
 		}
@@ -65,6 +83,8 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 	var fullResponse string
 	for ev := range events {
 		switch ev.Type {
+		case agent.TurnApprovalNeeded:
+			cr.sendApprovalRequest(ctx, adapter, msg.SessionID, ev.ApprovalRequest)
 		case agent.TurnDone:
 			fullResponse = ev.Message
 		case agent.TurnError:
@@ -89,4 +109,61 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 			slog.String("err", err.Error()),
 		)
 	}
+}
+
+func (cr *ChannelRouter) sendApprovalRequest(ctx context.Context, adapter channels.Adapter, sessionID string, req *agent.ApprovalRequest) {
+	if req == nil {
+		return
+	}
+
+	channelReq := channels.ApprovalRequest{
+		RequestID: req.ID,
+		SessionID: sessionID,
+		ToolName:  req.ToolName,
+		Input:     req.Input,
+	}
+
+	if sender, ok := adapter.(channels.ApprovalSender); ok {
+		if err := sender.SendApprovalRequest(ctx, channelReq); err != nil {
+			cr.logger.Error("failed to send approval request via adapter",
+				slog.String("channel", adapter.Name()),
+				slog.String("err", err.Error()),
+			)
+		}
+		return
+	}
+
+	text := fmt.Sprintf("Tool approval needed: %s\nInput: %s\n\nReply with:\n  approve %s\n  deny %s", req.ToolName, req.Input, req.ID, req.ID)
+	if err := adapter.Send(ctx, channels.OutboundMessage{
+		SessionID: sessionID,
+		Content:   text,
+	}); err != nil {
+		cr.logger.Error("failed to send text approval request",
+			slog.String("channel", adapter.Name()),
+			slog.String("err", err.Error()),
+		)
+	}
+}
+
+func parseTextApproval(text string) (channels.InboundApprovalResponse, bool) {
+	text = strings.TrimSpace(text)
+	lower := strings.ToLower(text)
+
+	if strings.HasPrefix(lower, "approve ") {
+		id := strings.TrimSpace(text[len("approve "):])
+		if id == "" {
+			return channels.InboundApprovalResponse{}, false
+		}
+		return channels.InboundApprovalResponse{RequestID: id, Approved: true}, true
+	}
+
+	if strings.HasPrefix(lower, "deny ") {
+		id := strings.TrimSpace(text[len("deny "):])
+		if id == "" {
+			return channels.InboundApprovalResponse{}, false
+		}
+		return channels.InboundApprovalResponse{RequestID: id, Approved: false}, true
+	}
+
+	return channels.InboundApprovalResponse{}, false
 }
