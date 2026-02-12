@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/llm"
+	"github.com/igorsilveira/pincer/pkg/memory"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -43,26 +46,34 @@ const (
 )
 
 type Runtime struct {
-	provider     llm.Provider
-	store        *store.Store
-	registry     *tools.Registry
-	sandbox      sandbox.Sandbox
-	approver     *Approver
-	model        string
-	maxTokens    int
-	systemPrompt string
-	contextCache map[string]string
+	provider      llm.Provider
+	store         *store.Store
+	registry      *tools.Registry
+	sandbox       sandbox.Sandbox
+	approver      *Approver
+	model         string
+	maxTokens     int
+	systemPrompt  string
+	memory        *memory.Store
+	audit         *audit.Logger
+	defaultPolicy sandbox.Policy
+	ctxBuilder    *ContextBuilder
+	memoryMu      sync.Mutex
+	memoryHashes  map[string]map[string]string
 }
 
 type RuntimeConfig struct {
-	Provider     llm.Provider
-	Store        *store.Store
-	Registry     *tools.Registry
-	Sandbox      sandbox.Sandbox
-	Approver     *Approver
-	Model        string
-	MaxTokens    int
-	SystemPrompt string
+	Provider      llm.Provider
+	Store         *store.Store
+	Registry      *tools.Registry
+	Sandbox       sandbox.Sandbox
+	Approver      *Approver
+	Model         string
+	MaxTokens     int
+	SystemPrompt  string
+	Memory        *memory.Store
+	Audit         *audit.Logger
+	DefaultPolicy sandbox.Policy
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -73,15 +84,19 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		cfg.SystemPrompt = defaultSystemPrompt
 	}
 	return &Runtime{
-		provider:     cfg.Provider,
-		store:        cfg.Store,
-		registry:     cfg.Registry,
-		sandbox:      cfg.Sandbox,
-		approver:     cfg.Approver,
-		model:        cfg.Model,
-		maxTokens:    cfg.MaxTokens,
-		systemPrompt: cfg.SystemPrompt,
-		contextCache: make(map[string]string),
+		provider:      cfg.Provider,
+		store:         cfg.Store,
+		registry:      cfg.Registry,
+		sandbox:       cfg.Sandbox,
+		approver:      cfg.Approver,
+		model:         cfg.Model,
+		maxTokens:     cfg.MaxTokens,
+		systemPrompt:  cfg.SystemPrompt,
+		memory:        cfg.Memory,
+		audit:         cfg.Audit,
+		defaultPolicy: cfg.DefaultPolicy,
+		ctxBuilder:    NewContextBuilder(cfg.MaxTokens),
+		memoryHashes:  make(map[string]map[string]string),
 	}
 }
 
@@ -122,6 +137,17 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 	defer close(out)
 	logger := telemetry.FromContext(ctx)
 
+	sess, err := r.store.GetSession(ctx, sessionID)
+	if err != nil {
+		out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("loading session: %w", err)}
+		return
+	}
+	ctx = tools.WithSessionInfo(ctx, sessionID, sess.AgentID)
+
+	if err := r.CompactSession(ctx, sessionID); err != nil {
+		logger.Warn("session compaction failed", slog.String("err", err.Error()))
+	}
+
 	for iteration := 0; iteration < maxToolIterations; iteration++ {
 
 		history, err := r.store.RecentMessages(ctx, sessionID, 50)
@@ -130,7 +156,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			return
 		}
 
-		chatMessages := r.buildContext(history)
+		systemPrompt, chatMessages := r.buildSmartContext(ctx, sess.AgentID, sessionID, history)
 
 		var toolDefs []llm.ToolDefinition
 		if r.registry != nil && r.provider.SupportsToolUse() {
@@ -139,7 +165,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 
 		events, err := r.provider.Chat(ctx, llm.ChatRequest{
 			Model:     r.model,
-			System:    r.systemPrompt,
+			System:    systemPrompt,
 			Messages:  chatMessages,
 			MaxTokens: r.maxTokens,
 			Stream:    true,
@@ -214,18 +240,27 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 			Input:     string(tc.Input),
 		}
 
+		if r.approver.mode == ApprovalAsk {
+			out <- TurnEvent{
+				Type:            TurnApprovalNeeded,
+				ApprovalRequest: &req,
+			}
+		}
+
 		approved, err := r.approver.RequestApproval(ctx, req)
 		if err != nil || !approved {
 			reason := "tool call denied by user"
 			if err != nil {
 				reason = fmt.Sprintf("approval error: %v", err)
 			}
+			r.auditLog(ctx, audit.EventToolDeny, sessionID, tc.Name, reason)
 			return llm.ToolResult{
 				ToolCallID: tc.ID,
 				Content:    reason,
 				IsError:    true,
 			}
 		}
+		r.auditLog(ctx, audit.EventToolApprove, sessionID, tc.Name, "")
 	}
 
 	if r.registry == nil {
@@ -245,7 +280,10 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		}
 	}
 
-	policy := sandbox.DefaultPolicy()
+	policy := r.defaultPolicy
+	if policy.Timeout == 0 {
+		policy = sandbox.DefaultPolicy()
+	}
 	if r.approver != nil && r.approver.mode == ApprovalAuto {
 		policy.RequireApproval = false
 	}
@@ -256,6 +294,8 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 			slog.String("tool", tc.Name),
 			slog.String("err", err.Error()),
 		)
+		r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name,
+			fmt.Sprintf("error: %v", err))
 		return llm.ToolResult{
 			ToolCallID: tc.ID,
 			Content:    fmt.Sprintf("error: %v", err),
@@ -263,6 +303,7 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		}
 	}
 
+	r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
 	out <- TurnEvent{Type: TurnToolResult}
 
 	return llm.ToolResult{
@@ -402,7 +443,46 @@ func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*st
 	if err := r.store.CreateSession(ctx, sess); err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
 	}
+	r.auditLog(ctx, audit.EventSessionNew, sessionID, "system",
+		fmt.Sprintf("channel=%s peer=%s", sess.Channel, sess.PeerID))
 	return sess, nil
+}
+
+func (r *Runtime) buildSmartContext(ctx context.Context, agentID, sessionID string, history []store.Message) (string, []llm.ChatMessage) {
+	if r.ctxBuilder == nil {
+		return r.systemPrompt, r.buildContext(history)
+	}
+
+	var wsFiles []WorkspaceFile
+
+	if r.memory != nil {
+		r.memoryMu.Lock()
+		lastHashes := r.memoryHashes[sessionID]
+		if lastHashes == nil {
+			lastHashes = make(map[string]string)
+		}
+		r.memoryMu.Unlock()
+
+		memCtx, newHashes, err := r.memory.BuildContext(ctx, agentID, lastHashes)
+		if err == nil {
+			r.memoryMu.Lock()
+			r.memoryHashes[sessionID] = newHashes
+			r.memoryMu.Unlock()
+
+			if memCtx != "" {
+				wsFiles = append(wsFiles, WorkspaceFile{Key: "memory", Content: memCtx})
+			}
+		}
+	}
+
+	return r.ctxBuilder.Build(wsFiles, history, r.systemPrompt)
+}
+
+func (r *Runtime) auditLog(ctx context.Context, eventType, sessionID, actor, detail string) {
+	if r.audit == nil {
+		return
+	}
+	_ = r.audit.Log(ctx, eventType, sessionID, tools.AgentIDFromContext(ctx), actor, detail)
 }
 
 func ContentHash(content string) string {
