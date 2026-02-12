@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
@@ -48,6 +49,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentMessageContent
 	dg.AddHandler(a.handleMessage)
+	dg.AddHandler(a.handleInteraction)
 
 	if err := dg.Open(); err != nil {
 		return fmt.Errorf("discord: opening connection: %w", err)
@@ -123,6 +125,96 @@ func (a *Adapter) Capabilities() channels.ChannelCaps {
 	}
 }
 
+func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.ApprovalRequest) error {
+	if a.session == nil {
+		return fmt.Errorf("discord: not connected")
+	}
+
+	a.mu.RLock()
+	var channelID string
+	for cid, sid := range a.sessions {
+		if sid == req.SessionID {
+			channelID = cid
+			break
+		}
+	}
+	a.mu.RUnlock()
+
+	if channelID == "" {
+		return fmt.Errorf("discord: no channel for session %s", req.SessionID)
+	}
+
+	content := fmt.Sprintf("**Tool approval needed: %s**\nInput: `%s`", req.ToolName, req.Input)
+
+	_, err := a.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content: content,
+		Components: []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label:    "Approve",
+						Style:    discordgo.SuccessButton,
+						CustomID: "approval:approve:" + req.RequestID,
+					},
+					discordgo.Button{
+						Label:    "Deny",
+						Style:    discordgo.DangerButton,
+						CustomID: "approval:deny:" + req.RequestID,
+					},
+				},
+			},
+		},
+	})
+	return err
+}
+
+func (a *Adapter) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionMessageComponent {
+		return
+	}
+
+	customID := i.MessageComponentData().CustomID
+	parts := strings.SplitN(customID, ":", 3)
+	if len(parts) != 3 || parts[0] != "approval" {
+		return
+	}
+
+	action := parts[1]
+	requestID := parts[2]
+	approved := action == "approve"
+
+	status := "Approved"
+	if !approved {
+		status = "Denied"
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    i.Message.Content + "\n\n**" + status + "**",
+			Components: []discordgo.MessageComponent{},
+		},
+	})
+
+	sessionID := a.sessionForChannel(i.ChannelID)
+	peerID := ""
+	if i.Member != nil && i.Member.User != nil {
+		peerID = i.Member.User.ID
+	} else if i.User != nil {
+		peerID = i.User.ID
+	}
+
+	a.inbound <- channels.InboundMessage{
+		ChannelName: "discord",
+		SessionID:   sessionID,
+		PeerID:      peerID,
+		ApprovalResponse: &channels.InboundApprovalResponse{
+			RequestID: requestID,
+			Approved:  approved,
+		},
+	}
+}
+
 func (a *Adapter) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if m.Author.ID == s.State.User.ID {
@@ -167,4 +259,10 @@ func (a *Adapter) getOrCreateSession(channelID string) string {
 	sid = fmt.Sprintf("dc-%s", channelID)
 	a.sessions[channelID] = sid
 	return sid
+}
+
+func (a *Adapter) sessionForChannel(channelID string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.sessions[channelID]
 }
