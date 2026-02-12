@@ -221,7 +221,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	channelAdapters = append(channelAdapters, initChannelAdapters(ctx, cfg, logger)...)
 
 	if len(channelAdapters) > 0 {
-		router := gateway.NewChannelRouter(runtime, channelAdapters, logger)
+		router := gateway.NewChannelRouter(runtime, channelAdapters, approver, logger)
 		router.Start(ctx)
 	}
 
