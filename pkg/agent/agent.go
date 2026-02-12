@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -16,6 +16,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
+	"gorm.io/gorm"
 )
 
 const maxToolIterations = 10
@@ -385,7 +386,7 @@ func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*st
 	if err == nil {
 		return sess, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 

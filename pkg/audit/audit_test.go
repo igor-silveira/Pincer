@@ -2,22 +2,28 @@ package audit
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func testLogger(t *testing.T) *Logger {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	db, err := sql.Open("sqlite", dsn)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Discard,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	})
 
 	l, err := New(db)
 	if err != nil {

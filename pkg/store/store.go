@@ -2,93 +2,43 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Store struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 func New(dsn string) (*Store, error) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := gorm.Open(sqlite.Open(dsn+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"), &gorm.Config{
+		Logger: logger.Discard,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enabling WAL mode: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enabling foreign keys: %w", err)
-	}
-
-	s := &Store{db: db}
-	if err := s.migrate(); err != nil {
-		db.Close()
+	if err := db.AutoMigrate(&Session{}, &Message{}, &Memory{}, &Credential{}); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
-	return s, nil
+	return &Store{db: db}, nil
 }
 
-func (s *Store) DB() *sql.DB {
+func (s *Store) DB() *gorm.DB {
 	return s.db
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
-}
-
-func (s *Store) migrate() error {
-	for _, stmt := range migrations {
-		if _, err := s.db.Exec(stmt); err != nil {
-			return fmt.Errorf("migration failed: %w\nSQL: %s", err, stmt)
-		}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
 	}
-	return nil
-}
-
-var migrations = []string{
-	`CREATE TABLE IF NOT EXISTS sessions (
-	    id         TEXT PRIMARY KEY,
-	    agent_id   TEXT NOT NULL,
-	    channel    TEXT NOT NULL,
-	    peer_id    TEXT NOT NULL,
-	    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`,
-	`CREATE TABLE IF NOT EXISTS messages (
-	    id           TEXT PRIMARY KEY,
-	    session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-	    role         TEXT NOT NULL,
-	    content_type TEXT NOT NULL DEFAULT 'text',
-	    content      TEXT NOT NULL,
-	    token_count  INTEGER NOT NULL DEFAULT 0,
-	    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`,
-	`CREATE TABLE IF NOT EXISTS memory (
-	    id         TEXT PRIMARY KEY,
-	    agent_id   TEXT NOT NULL,
-	    key        TEXT NOT NULL,
-	    value      TEXT NOT NULL,
-	    hash       TEXT NOT NULL,
-	    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	    UNIQUE(agent_id, key)
-	)`,
-	`CREATE TABLE IF NOT EXISTS credentials (
-	    id              TEXT PRIMARY KEY,
-	    name            TEXT NOT NULL UNIQUE,
-	    encrypted_value BLOB NOT NULL,
-	    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`,
+	return sqlDB.Close()
 }
 
 const (
@@ -98,38 +48,51 @@ const (
 )
 
 type Session struct {
-	ID        string
-	AgentID   string
-	Channel   string
-	PeerID    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        string    `gorm:"primaryKey;column:id"`
+	AgentID   string    `gorm:"column:agent_id;not null"`
+	Channel   string    `gorm:"column:channel;not null"`
+	PeerID    string    `gorm:"column:peer_id;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
 
 type Message struct {
-	ID          string
-	SessionID   string
-	Role        string
-	ContentType string
-	Content     string
-	TokenCount  int
-	CreatedAt   time.Time
+	ID          string    `gorm:"primaryKey;column:id"`
+	SessionID   string    `gorm:"column:session_id;not null;index:idx_messages_session"`
+	Role        string    `gorm:"column:role;not null"`
+	ContentType string    `gorm:"column:content_type;not null;default:text"`
+	Content     string    `gorm:"column:content;not null"`
+	TokenCount  int       `gorm:"column:token_count;not null;default:0"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;index:idx_messages_session"`
+}
+
+type Memory struct {
+	ID        string    `gorm:"primaryKey;column:id"`
+	AgentID   string    `gorm:"column:agent_id;not null;uniqueIndex:idx_memory_agent_key"`
+	Key       string    `gorm:"column:key;not null;uniqueIndex:idx_memory_agent_key"`
+	Value     string    `gorm:"column:value;not null"`
+	Hash      string    `gorm:"column:hash;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (Memory) TableName() string {
+	return "memory"
+}
+
+type Credential struct {
+	ID             string    `gorm:"primaryKey;column:id"`
+	Name           string    `gorm:"column:name;not null;uniqueIndex"`
+	EncryptedValue []byte    `gorm:"column:encrypted_value;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, agent_id, channel, peer_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		sess.ID, sess.AgentID, sess.Channel, sess.PeerID, sess.CreatedAt, sess.UpdatedAt,
-	)
-	return err
+	return s.db.WithContext(ctx).Create(sess).Error
 }
 
 func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 	sess := &Session{}
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, agent_id, channel, peer_id, created_at, updated_at FROM sessions WHERE id = ?`, id,
-	).Scan(&sess.ID, &sess.AgentID, &sess.Channel, &sess.PeerID, &sess.CreatedAt, &sess.UpdatedAt)
+	err := s.db.WithContext(ctx).First(sess, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -138,12 +101,10 @@ func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 
 func (s *Store) FindSession(ctx context.Context, agentID, channel, peerID string) (*Session, error) {
 	sess := &Session{}
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, agent_id, channel, peer_id, created_at, updated_at
-		 FROM sessions WHERE agent_id = ? AND channel = ? AND peer_id = ?
-		 ORDER BY updated_at DESC LIMIT 1`,
-		agentID, channel, peerID,
-	).Scan(&sess.ID, &sess.AgentID, &sess.Channel, &sess.PeerID, &sess.CreatedAt, &sess.UpdatedAt)
+	err := s.db.WithContext(ctx).
+		Where("agent_id = ? AND channel = ? AND peer_id = ?", agentID, channel, peerID).
+		Order("updated_at DESC").
+		First(sess).Error
 	if err != nil {
 		return nil, err
 	}
@@ -151,66 +112,53 @@ func (s *Store) FindSession(ctx context.Context, agentID, channel, peerID string
 }
 
 func (s *Store) TouchSession(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE sessions SET updated_at = ? WHERE id = ?`, time.Now().UTC(), id,
-	)
-	return err
+	return s.db.WithContext(ctx).
+		Model(&Session{}).
+		Where("id = ?", id).
+		Update("updated_at", time.Now().UTC()).Error
 }
 
 func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
-	contentType := msg.ContentType
-	if contentType == "" {
-		contentType = ContentTypeText
+	if msg.ContentType == "" {
+		msg.ContentType = ContentTypeText
 	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO messages (id, session_id, role, content_type, content, token_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.SessionID, msg.Role, contentType, msg.Content, msg.TokenCount, msg.CreatedAt,
-	)
-	return err
+	return s.db.WithContext(ctx).Create(msg).Error
 }
 
 func (s *Store) RecentMessages(ctx context.Context, sessionID string, limit int) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, role, content_type, content, token_count, created_at
-		 FROM messages WHERE session_id = ?
-		 ORDER BY created_at DESC LIMIT ?`,
-		sessionID, limit,
-	)
+	var msgs []Message
+	err := s.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&msgs).Error
 	if err != nil {
 		return nil, err
-	}
-	defer rows.Close()
-
-	var msgs []Message
-	for rows.Next() {
-		var m Message
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.ContentType, &m.Content, &m.TokenCount, &m.CreatedAt); err != nil {
-			return nil, err
-		}
-		msgs = append(msgs, m)
 	}
 
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 
-	return msgs, rows.Err()
+	return msgs, nil
 }
 
 func (s *Store) MessageCount(ctx context.Context, sessionID string) (int, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID,
-	).Scan(&count)
-	return count, err
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&Message{}).
+		Where("session_id = ?", sessionID).
+		Count(&count).Error
+	return int(count), err
 }
 
 func (s *Store) SessionTokenUsage(ctx context.Context, sessionID string) (int, error) {
 	var total int
-	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(token_count), 0) FROM messages WHERE session_id = ?`, sessionID,
-	).Scan(&total)
+	err := s.db.WithContext(ctx).
+		Model(&Message{}).
+		Where("session_id = ?", sessionID).
+		Select("COALESCE(SUM(token_count), 0)").
+		Scan(&total).Error
 	return total, err
 }
 
@@ -219,23 +167,7 @@ func (s *Store) DeleteMessages(ctx context.Context, ids []string) error {
 		return nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, `DELETE FROM messages WHERE id = ?`)
-	if err != nil {
-		return fmt.Errorf("preparing statement: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, id := range ids {
-		if _, err := stmt.ExecContext(ctx, id); err != nil {
-			return fmt.Errorf("deleting message %s: %w", id, err)
-		}
-	}
-
-	return tx.Commit()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&Message{}, ids).Error
+	})
 }

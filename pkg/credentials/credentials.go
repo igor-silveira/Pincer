@@ -6,21 +6,30 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
+type Credential struct {
+	ID             string    `gorm:"primaryKey;column:id"`
+	Name           string    `gorm:"column:name;not null;uniqueIndex"`
+	EncryptedValue []byte    `gorm:"column:encrypted_value;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+}
+
 type Store struct {
-	db  *sql.DB
+	db  *gorm.DB
 	gcm cipher.AEAD
 }
 
-func New(db *sql.DB, masterKey string) (*Store, error) {
+func New(db *gorm.DB, masterKey string) (*Store, error) {
 	if masterKey == "" {
 		return nil, fmt.Errorf("credentials: master key must not be empty")
 	}
@@ -46,28 +55,32 @@ func (s *Store) Set(ctx context.Context, name, value string) error {
 		return fmt.Errorf("credentials: encrypting: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO credentials (id, name, encrypted_value, created_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(name) DO UPDATE SET encrypted_value = excluded.encrypted_value`,
-		uuid.NewString(), name, encrypted, time.Now().UTC(),
-	)
-	return err
+	cred := &Credential{
+		ID:             uuid.NewString(),
+		Name:           name,
+		EncryptedValue: encrypted,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"encrypted_value"}),
+	}).Create(cred).Error
 }
 
 func (s *Store) Get(ctx context.Context, name string) (string, error) {
-	var encrypted []byte
-	err := s.db.QueryRowContext(ctx,
-		`SELECT encrypted_value FROM credentials WHERE name = ?`, name,
-	).Scan(&encrypted)
+	var cred Credential
+	err := s.db.WithContext(ctx).
+		Where("name = ?", name).
+		First(&cred).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", fmt.Errorf("credentials: %q not found", name)
 		}
 		return "", err
 	}
 
-	plaintext, err := s.decrypt(encrypted)
+	plaintext, err := s.decrypt(cred.EncryptedValue)
 	if err != nil {
 		return "", fmt.Errorf("credentials: decrypting %q: %w", name, err)
 	}
@@ -76,33 +89,23 @@ func (s *Store) Get(ctx context.Context, name string) (string, error) {
 }
 
 func (s *Store) Delete(ctx context.Context, name string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM credentials WHERE name = ?`, name)
-	if err != nil {
-		return err
+	result := s.db.WithContext(ctx).Where("name = ?", name).Delete(&Credential{})
+	if result.Error != nil {
+		return result.Error
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("credentials: %q not found", name)
 	}
 	return nil
 }
 
 func (s *Store) List(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name FROM credentials ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		names = append(names, name)
-	}
-	return names, rows.Err()
+	err := s.db.WithContext(ctx).
+		Model(&Credential{}).
+		Order("name").
+		Pluck("name", &names).Error
+	return names, err
 }
 
 func (s *Store) encrypt(plaintext []byte) ([]byte, error) {
