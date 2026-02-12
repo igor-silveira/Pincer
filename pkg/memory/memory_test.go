@@ -2,27 +2,32 @@ package memory
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-func testDB(t *testing.T) *sql.DB {
+func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	db, err := sql.Open("sqlite", dsn)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Discard,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	})
 
-	db.Exec(`CREATE TABLE IF NOT EXISTS memory (
-		id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, key TEXT NOT NULL,
-		value TEXT NOT NULL, hash TEXT NOT NULL, updated_at TIMESTAMP NOT NULL,
-		UNIQUE(agent_id, key))`)
+	if err := db.AutoMigrate(&Entry{}); err != nil {
+		t.Fatal(err)
+	}
 
 	return db
 }

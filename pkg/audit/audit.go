@@ -2,12 +2,12 @@ package audit
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -24,36 +24,26 @@ const (
 )
 
 type Entry struct {
-	ID        string
-	Timestamp time.Time
-	EventType string
-	SessionID string
-	AgentID   string
-	Actor     string
-	Detail    string
+	ID        string    `gorm:"primaryKey;column:id"`
+	Timestamp time.Time `gorm:"column:timestamp;not null;index:idx_audit_timestamp"`
+	EventType string    `gorm:"column:event_type;not null"`
+	SessionID string    `gorm:"column:session_id;not null;default:''"`
+	AgentID   string    `gorm:"column:agent_id;not null;default:''"`
+	Actor     string    `gorm:"column:actor;not null;default:''"`
+	Detail    string    `gorm:"column:detail;not null;default:''"`
+}
+
+func (Entry) TableName() string {
+	return "audit_log"
 }
 
 type Logger struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func New(db *sql.DB) (*Logger, error) {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS audit_log (
-		id         TEXT PRIMARY KEY,
-		timestamp  TIMESTAMP NOT NULL,
-		event_type TEXT NOT NULL,
-		session_id TEXT NOT NULL DEFAULT '',
-		agent_id   TEXT NOT NULL DEFAULT '',
-		actor      TEXT NOT NULL DEFAULT '',
-		detail     TEXT NOT NULL DEFAULT ''
-	)`)
-	if err != nil {
-		return nil, fmt.Errorf("audit: creating table: %w", err)
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)`)
-	if err != nil {
-		return nil, fmt.Errorf("audit: creating index: %w", err)
+func New(db *gorm.DB) (*Logger, error) {
+	if err := db.AutoMigrate(&Entry{}); err != nil {
+		return nil, fmt.Errorf("audit: running migrations: %w", err)
 	}
 
 	return &Logger{db: db}, nil
@@ -73,61 +63,47 @@ func (l *Logger) Log(ctx context.Context, eventType, sessionID, agentID, actor s
 		}
 	}
 
-	_, err := l.db.ExecContext(ctx,
-		`INSERT INTO audit_log (id, timestamp, event_type, session_id, agent_id, actor, detail)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		uuid.NewString(), time.Now().UTC(), eventType, sessionID, agentID, actor, detailStr,
-	)
-	return err
+	entry := &Entry{
+		ID:        uuid.NewString(),
+		Timestamp: time.Now().UTC(),
+		EventType: eventType,
+		SessionID: sessionID,
+		AgentID:   agentID,
+		Actor:     actor,
+		Detail:    detailStr,
+	}
+
+	return l.db.WithContext(ctx).Create(entry).Error
 }
 
 func (l *Logger) Query(ctx context.Context, f Filter) ([]Entry, error) {
-	query := `SELECT id, timestamp, event_type, session_id, agent_id, actor, detail FROM audit_log WHERE 1=1`
-	var args []any
+	q := l.db.WithContext(ctx)
 
 	if f.EventType != "" {
-		query += ` AND event_type = ?`
-		args = append(args, f.EventType)
+		q = q.Where("event_type = ?", f.EventType)
 	}
 	if f.SessionID != "" {
-		query += ` AND session_id = ?`
-		args = append(args, f.SessionID)
+		q = q.Where("session_id = ?", f.SessionID)
 	}
 	if f.AgentID != "" {
-		query += ` AND agent_id = ?`
-		args = append(args, f.AgentID)
+		q = q.Where("agent_id = ?", f.AgentID)
 	}
 	if !f.Since.IsZero() {
-		query += ` AND timestamp >= ?`
-		args = append(args, f.Since)
+		q = q.Where("timestamp >= ?", f.Since)
 	}
 	if !f.Until.IsZero() {
-		query += ` AND timestamp <= ?`
-		args = append(args, f.Until)
+		q = q.Where("timestamp <= ?", f.Until)
 	}
 
-	query += ` ORDER BY timestamp DESC`
+	q = q.Order("timestamp DESC")
 
 	if f.Limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, f.Limit)
+		q = q.Limit(f.Limit)
 	}
-
-	rows, err := l.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 
 	var entries []Entry
-	for rows.Next() {
-		var e Entry
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.EventType, &e.SessionID, &e.AgentID, &e.Actor, &e.Detail); err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
-	}
-	return entries, rows.Err()
+	err := q.Find(&entries).Error
+	return entries, err
 }
 
 type Filter struct {

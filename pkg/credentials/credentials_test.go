@@ -2,25 +2,31 @@ package credentials
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-func testDB(t *testing.T) *sql.DB {
+func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "test.db")
-	db, err := sql.Open("sqlite", dsn)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Discard,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() {
+		sqlDB, _ := db.DB()
+		sqlDB.Close()
+	})
 
-	db.Exec(`CREATE TABLE IF NOT EXISTS credentials (
-		id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-		encrypted_value BLOB NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`)
+	if err := db.AutoMigrate(&Credential{}); err != nil {
+		t.Fatal(err)
+	}
 
 	return db
 }
