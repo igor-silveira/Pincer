@@ -2,10 +2,12 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,21 +19,25 @@ import (
 )
 
 type Gateway struct {
-	server   *http.Server
-	router   *chi.Mux
-	runtime  *agent.Runtime
-	chat     *webchat.Adapter
-	approver *agent.Approver
-	logger   *slog.Logger
+	server    *http.Server
+	router    *chi.Mux
+	runtime   *agent.Runtime
+	chat      *webchat.Adapter
+	approver  *agent.Approver
+	logger    *slog.Logger
+	webhooks  http.Handler
+	authToken string
 }
 
 type Config struct {
-	Bind     string
-	Port     int
-	Runtime  *agent.Runtime
-	Chat     *webchat.Adapter
-	Approver *agent.Approver
-	Logger   *slog.Logger
+	Bind      string
+	Port      int
+	Runtime   *agent.Runtime
+	Chat      *webchat.Adapter
+	Approver  *agent.Approver
+	Logger    *slog.Logger
+	Webhooks  http.Handler
+	AuthToken string
 }
 
 func New(cfg Config) *Gateway {
@@ -45,11 +51,13 @@ func New(cfg Config) *Gateway {
 	r.Use(middleware.RealIP)
 
 	g := &Gateway{
-		router:   r,
-		runtime:  cfg.Runtime,
-		chat:     cfg.Chat,
-		approver: cfg.Approver,
-		logger:   cfg.Logger,
+		router:    r,
+		runtime:   cfg.Runtime,
+		chat:      cfg.Chat,
+		approver:  cfg.Approver,
+		logger:    cfg.Logger,
+		webhooks:  cfg.Webhooks,
+		authToken: cfg.AuthToken,
 	}
 
 	g.registerRoutes()
@@ -69,8 +77,17 @@ func (g *Gateway) registerRoutes() {
 	g.router.Get("/healthz", g.handleHealthz)
 	g.router.Get("/readyz", g.handleReadyz)
 	g.router.Handle("/metrics", promhttp.Handler())
-	g.router.Get("/", g.handleWebChatPage)
-	g.router.Get("/ws", g.handleWebSocket)
+
+	g.router.Group(func(r chi.Router) {
+		if g.authToken != "" {
+			r.Use(g.authMiddleware)
+		}
+		r.Get("/", g.handleWebChatPage)
+		r.Get("/ws", g.handleWebSocket)
+		if g.webhooks != nil {
+			r.Post("/webhooks", g.webhooks.ServeHTTP)
+		}
+	})
 }
 
 func (g *Gateway) Start(ctx context.Context) error {
@@ -115,6 +132,20 @@ func (g *Gateway) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, `{"status":"ready"}`)
+}
+
+func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(header, "Bearer ")
+		if token == "" || token == header || token != g.authToken {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func resolveAddr(bind string, port int) string {
