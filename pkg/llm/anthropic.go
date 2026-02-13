@@ -93,6 +93,7 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 		Model:     model,
 		MaxTokens: maxTokens,
 		System:    req.System,
+		Messages:  make([]anthropicMessage, 0, len(req.Messages)),
 		Stream:    req.Stream,
 	}
 

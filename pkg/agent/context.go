@@ -74,7 +74,7 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 
 func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []llm.ChatMessage {
 	if budget <= 0 || len(history) == 0 {
-		return nil
+		return []llm.ChatMessage{}
 	}
 
 	type indexedMsg struct {
@@ -108,7 +108,7 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 }
 
 func sanitizeToolPairs(msgs []llm.ChatMessage) []llm.ChatMessage {
-	var result []llm.ChatMessage
+	result := make([]llm.ChatMessage, 0, len(msgs))
 	i := 0
 	for i < len(msgs) {
 		if msgs[i].Role == llm.RoleAssistant && len(msgs[i].ToolCalls) > 0 {
