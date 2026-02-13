@@ -82,6 +82,8 @@ dsn = ""  # defaults to ~/.pincer/pincer.db
 mode = "process"       # process | container
 network_policy = "deny"
 max_timeout = "5m"
+allowed_paths = []     # restrict tool filesystem access (empty = allow all)
+read_only_paths = []   # prevent writes to these directories
 
 [memory]
 immutable_keys = ["identity", "core_values"]
@@ -197,13 +199,13 @@ Pincer routes to the correct provider based on the model name prefix:
 
 ### Sandbox tiers
 
-**Process isolation** (default) - Runs tools as child processes with timeout enforcement, output limits, and environment restrictions.
+**Process isolation** (default) - Runs tools as child processes with timeout enforcement, output limits, work directory validation, and environment restrictions. File tools enforce `allowed_paths` and `read_only_paths` with symlink-aware path resolution. HTTP and browser tools respect the `network_policy` setting.
 
 **Container isolation** - Runs tools inside ephemeral containers with read-only root filesystem, dropped capabilities, no network by default, and memory/PID limits.
 
 ### Security model
 
-- All tool executions go through the sandbox with configurable network and filesystem policies
+- All tool executions go through the sandbox with configurable network and filesystem policies; path checks resolve symlinks to prevent escape attacks
 - Credential storage uses AES-256-GCM with keys derived via Argon2id from a master passphrase
 - Skills require Ed25519 signatures by default; unsigned skills need explicit opt-in
 - Static analysis scans skills for exfiltration patterns on load
