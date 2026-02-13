@@ -7,7 +7,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o /pincer .
+ARG VERSION=0.1.0
+RUN go build -ldflags="-s -w -X github.com/igorsilveira/pincer/cmd/pincer.version=${VERSION}" -trimpath -o /pincer .
 
 FROM alpine:3.21
 
