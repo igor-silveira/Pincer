@@ -13,6 +13,7 @@ import (
 type NotifyTool struct {
 	RunAndDeliver func(ctx context.Context, sessionID, prompt string)
 	Send          func(ctx context.Context, sessionID, content string) error
+	AuditLog      func(ctx context.Context, eventType, sessionID, detail string)
 }
 
 type notifyInput struct {
@@ -80,6 +81,8 @@ func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 			t.RunAndDeliver(context.Background(), sid, prompt)
 		})
 
+		t.auditLog(ctx, "notify_schedule", sid, fmt.Sprintf("delay=%s prompt=%s", delay, params.Message))
+
 		return fmt.Sprintf("scheduled: will run in %s", delay), nil
 
 	case "send":
@@ -93,5 +96,11 @@ func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 
 	default:
 		return "", fmt.Errorf("notify: unknown action %q", params.Action)
+	}
+}
+
+func (t *NotifyTool) auditLog(ctx context.Context, eventType, sessionID, detail string) {
+	if t.AuditLog != nil {
+		t.AuditLog(ctx, eventType, sessionID, detail)
 	}
 }

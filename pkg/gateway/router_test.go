@@ -118,7 +118,7 @@ func TestInboundApprovalResponseRoutesToApprover(t *testing.T) {
 	adapter := newFakeAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -167,7 +167,7 @@ func TestTextApprovalRoutesToApprover(t *testing.T) {
 	adapter := newFakeAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -213,7 +213,7 @@ func TestSendApprovalRequestUsesApprovalSender(t *testing.T) {
 	adapter := newFakeApprovalAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil, nil)
 
 	ctx := context.Background()
 
@@ -248,7 +248,7 @@ func TestSendApprovalRequestFallsBackToText(t *testing.T) {
 	adapter := newFakeAdapter("whatsapp")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil, nil)
 
 	ctx := context.Background()
 
@@ -304,7 +304,7 @@ func TestEnsureSessionCreatesWithCorrectChannel(t *testing.T) {
 	adapter := newFakeAdapter("telegram")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db, nil)
 
 	ctx := context.Background()
 	msg := channels.InboundMessage{
@@ -341,7 +341,7 @@ func TestEnsureSessionFixesStaleChannel(t *testing.T) {
 	adapter := newFakeAdapter("telegram")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db, nil)
 
 	ctx := context.Background()
 
@@ -382,7 +382,7 @@ func TestSendToSessionRoutesToCorrectAdapter(t *testing.T) {
 	dcAdapter := newFakeAdapter("discord")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{tgAdapter, dcAdapter}, nil, logger, db)
+	router := NewChannelRouter(nil, []channels.Adapter{tgAdapter, dcAdapter}, nil, logger, db, nil)
 
 	ctx := context.Background()
 
@@ -424,7 +424,7 @@ func TestSendToSessionErrorsOnUnknownChannel(t *testing.T) {
 	adapter := newFakeAdapter("telegram")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db, nil)
 
 	ctx := context.Background()
 

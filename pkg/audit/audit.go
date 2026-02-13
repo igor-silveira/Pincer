@@ -19,8 +19,11 @@ const (
 	EventCredSet     = "credential_set"
 	EventCredDel     = "credential_del"
 	EventConfigChg   = "config_change"
-	EventSessionNew  = "session_new"
-	EventSkillLoad   = "skill_load"
+	EventSessionNew     = "session_new"
+	EventSkillLoad      = "skill_load"
+	EventNotifySchedule = "notify_schedule"
+	EventNotifyDeliver  = "notify_deliver"
+	EventNotifySend     = "notify_send"
 )
 
 type Entry struct {

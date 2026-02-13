@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -20,15 +21,17 @@ type ChannelRouter struct {
 	approver *agent.Approver
 	logger   *slog.Logger
 	store    *store.Store
+	audit    *audit.Logger
 }
 
-func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger, db *store.Store) *ChannelRouter {
+func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger, db *store.Store, auditLog *audit.Logger) *ChannelRouter {
 	return &ChannelRouter{
 		runtime:  runtime,
 		adapters: adapters,
 		approver: approver,
 		logger:   logger,
 		store:    db,
+		audit:    auditLog,
 	}
 }
 
@@ -210,6 +213,25 @@ func (cr *ChannelRouter) SendToSession(ctx context.Context, sessionID, content s
 		return fmt.Errorf("resolving adapter: %w", err)
 	}
 
+	if cr.store != nil {
+		msg := &store.Message{
+			ID:          uuid.NewString(),
+			SessionID:   sessionID,
+			Role:        "assistant",
+			ContentType: store.ContentTypeText,
+			Content:     content,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if err := cr.store.AppendMessage(ctx, msg); err != nil {
+			cr.logger.Error("notify: failed to persist send message",
+				slog.String("session_id", sessionID),
+				slog.String("err", err.Error()),
+			)
+		}
+	}
+
+	cr.AuditLog(ctx, audit.EventNotifySend, sessionID, fmt.Sprintf("len=%d", len(content)))
+
 	return adapter.Send(ctx, channels.OutboundMessage{
 		SessionID: sessionID,
 		Content:   content,
@@ -234,6 +256,8 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 		slog.String("session_id", sessionID),
 		slog.String("turn_id", turnID),
 	)
+
+	cr.AuditLog(ctx, audit.EventNotifyDeliver, sessionID, fmt.Sprintf("turn_id=%s prompt=%s", turnID, prompt))
 
 	events, err := cr.runtime.RunTurn(ctx, sessionID, prompt)
 	if err != nil {
@@ -273,6 +297,13 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 			slog.String("err", err.Error()),
 		)
 	}
+}
+
+func (cr *ChannelRouter) AuditLog(ctx context.Context, eventType, sessionID, detail string) {
+	if cr.audit == nil {
+		return
+	}
+	_ = cr.audit.Log(ctx, eventType, sessionID, "", "notify", detail)
 }
 
 func parseTextApproval(text string) (channels.InboundApprovalResponse, bool) {
