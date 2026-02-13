@@ -63,6 +63,10 @@ func (t *HTTPTool) Execute(ctx context.Context, input json.RawMessage, sb sandbo
 		return "", fmt.Errorf("http_request: url is required")
 	}
 
+	if policy.NetworkAccess == sandbox.NetworkDeny {
+		return "", fmt.Errorf("http_request: network access denied by sandbox policy")
+	}
+
 	method := params.Method
 	if method == "" {
 		method = "GET"
