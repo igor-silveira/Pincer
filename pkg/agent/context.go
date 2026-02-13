@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"sync"
 
 	"github.com/igorsilveira/pincer/pkg/llm"
@@ -107,6 +108,28 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 }
 
 func messageToLLM(m store.Message) llm.ChatMessage {
+	switch m.ContentType {
+	case store.ContentTypeToolCalls:
+		var data struct {
+			Text      string         `json:"text,omitempty"`
+			ToolCalls []llm.ToolCall `json:"tool_calls"`
+		}
+		if err := json.Unmarshal([]byte(m.Content), &data); err == nil {
+			return llm.ChatMessage{
+				Role:      m.Role,
+				Content:   data.Text,
+				ToolCalls: data.ToolCalls,
+			}
+		}
+	case store.ContentTypeToolResults:
+		var results []llm.ToolResult
+		if err := json.Unmarshal([]byte(m.Content), &results); err == nil {
+			return llm.ChatMessage{
+				Role:        m.Role,
+				ToolResults: results,
+			}
+		}
+	}
 
 	return llm.ChatMessage{
 		Role:    m.Role,

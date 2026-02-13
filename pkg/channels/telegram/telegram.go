@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"html"
 	"log/slog"
 	"os"
 	"strings"
@@ -113,7 +114,8 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 		return fmt.Errorf("telegram: no chat for session %s", req.SessionID)
 	}
 
-	text := fmt.Sprintf("🔧 Tool approval needed: *%s*\nInput: `%s`", req.ToolName, req.Input)
+	text := fmt.Sprintf("🔧 <b>Tool approval needed: %s</b>\nInput: <code>%s</code>",
+		html.EscapeString(req.ToolName), html.EscapeString(req.Input))
 
 	keyboard := &models.InlineKeyboardMarkup{
 		InlineKeyboard: [][]models.InlineKeyboardButton{
@@ -127,7 +129,7 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 	_, err := a.bot.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        text,
-		ParseMode:   models.ParseModeMarkdown,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: keyboard,
 	})
 	return err
