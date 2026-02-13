@@ -397,5 +397,8 @@ func buildDefaultPolicy(cfg *config.Config) sandbox.Policy {
 		p.NetworkAccess = sandbox.NetworkDeny
 	}
 
+	p.AllowedPaths = cfg.Sandbox.AllowedPaths
+	p.ReadOnlyPaths = cfg.Sandbox.ReadOnlyPaths
+
 	return p
 }
