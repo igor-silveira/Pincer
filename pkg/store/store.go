@@ -118,6 +118,17 @@ func (s *Store) TouchSession(ctx context.Context, id string) error {
 		Update("updated_at", time.Now().UTC()).Error
 }
 
+func (s *Store) UpdateSessionChannel(ctx context.Context, id, channel, peerID string) error {
+	return s.db.WithContext(ctx).
+		Model(&Session{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"channel":    channel,
+			"peer_id":    peerID,
+			"updated_at": time.Now().UTC(),
+		}).Error
+}
+
 func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
 	if msg.ContentType == "" {
 		msg.ContentType = ContentTypeText
