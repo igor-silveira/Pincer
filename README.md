@@ -33,6 +33,7 @@ A self-hosted, security-first AI assistant gateway written in Go. Pincer connect
 - **Smart context windowing** - Hash-based change detection to avoid redundant token usage
 - **Observability** - Structured logging via slog, Prometheus metrics, OpenTelemetry tracing, and append-only audit log
 - **Companion devices** - gRPC-based node system for mobile and desktop peripherals
+- **Proactive messaging** - Schedule delayed turns and send messages via the notify tool, with full audit logging
 - **Scheduler** - Interval-based cron jobs and HMAC-signed webhook ingestion
 - **Single binary** - Zero runtime dependencies, pure Go (no CGo)
 
@@ -156,7 +157,7 @@ pincer version     Print version
 cmd/pincer/           CLI commands (cobra)
 pkg/
   agent/              Agentic loop, approval flow, context windowing, compaction
-    tools/            Tool registry (shell, file, http, browser)
+    tools/            Tool registry (shell, file, http, browser, memory, credential, notify)
   audit/              Append-only audit log
   channels/           Channel adapter interface and implementations
     discord/            Discord adapter (discordgo)
@@ -210,6 +211,20 @@ Pincer routes to the correct provider based on the model name prefix:
 - Append-only audit log records all tool executions, memory changes, and configuration changes
 - WebSocket and HTTP endpoints bind to loopback by default
 
+## Docker
+
+```bash
+# Build the image
+docker build -t pincer:latest .
+
+# Run with a persistent data volume
+docker run -d -p 18789:18789 -v pincer-data:/data \
+  -e ANTHROPIC_API_KEY="sk-..." \
+  pincer:latest
+```
+
+Pass `--build-arg VERSION=x.y.z` to embed a specific version at build time.
+
 ## Development
 
 ### Prerequisites
@@ -236,7 +251,7 @@ ollama serve
 ollama pull llama3
 
 # Run Pincer with Ollama
-./pincer start --config pincer.toml
+./pincer start --config pincer.toml.example
 ```
 
 With the config:
