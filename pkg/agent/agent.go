@@ -177,6 +177,11 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 
 		systemPrompt, chatMessages := r.buildSmartContext(ctx, sess.AgentID, sessionID, history)
 
+		if len(chatMessages) == 0 {
+			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("no messages after context building")}
+			return
+		}
+
 		var toolDefs []llm.ToolDefinition
 		if r.registry != nil && r.provider.SupportsToolUse() {
 			toolDefs = r.registry.Definitions()
