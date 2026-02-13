@@ -221,12 +221,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 	channelAdapters = append(channelAdapters, initChannelAdapters(ctx, cfg, logger)...)
 
 	if len(channelAdapters) > 0 {
-		router := gateway.NewChannelRouter(runtime, channelAdapters, approver, logger, db)
+		router := gateway.NewChannelRouter(runtime, channelAdapters, approver, logger, db, auditLog)
 		router.Start(ctx)
 
 		registry.Register(&tools.NotifyTool{
 			RunAndDeliver: router.RunAndDeliver,
 			Send:          router.SendToSession,
+			AuditLog:      router.AuditLog,
 		})
 	}
 
