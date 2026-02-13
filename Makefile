@@ -9,7 +9,7 @@ PORT      := 18789
 all: vet test build
 
 build:
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY) .
+	go build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY) .
 
 run: build
 	./$(BINARY) start
