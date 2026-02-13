@@ -46,8 +46,11 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage, sb sa
 
 	path := params.Path
 	if !filepath.IsAbs(path) {
-
 		path = filepath.Clean(path)
+	}
+
+	if err := sandbox.CheckPathAllowed(path, policy.AllowedPaths); err != nil {
+		return "", fmt.Errorf("file_read: %w", err)
 	}
 
 	data, err := os.ReadFile(path)
@@ -113,6 +116,13 @@ func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage, sb s
 	path := params.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Clean(path)
+	}
+
+	if err := sandbox.CheckPathAllowed(path, policy.AllowedPaths); err != nil {
+		return "", fmt.Errorf("file_write: %w", err)
+	}
+	if err := sandbox.CheckPathWritable(path, policy.ReadOnlyPaths); err != nil {
+		return "", fmt.Errorf("file_write: %w", err)
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
