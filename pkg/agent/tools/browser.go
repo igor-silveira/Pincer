@@ -63,6 +63,10 @@ func (t *BrowserTool) Execute(ctx context.Context, input json.RawMessage, _ sand
 		return "", fmt.Errorf("browser: invalid input: %w", err)
 	}
 
+	if policy.NetworkAccess == sandbox.NetworkDeny {
+		return "", fmt.Errorf("browser: network access denied by sandbox policy")
+	}
+
 	timeout := policy.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -71,7 +75,6 @@ func (t *BrowserTool) Execute(ctx context.Context, input json.RawMessage, _ sand
 	allocCtx, allocCancel := chromedp.NewExecAllocator(ctx,
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 	)
 	defer allocCancel()
