@@ -22,6 +22,16 @@ func (s *ProcessSandbox) Exec(ctx context.Context, cmd Command, policy Policy) (
 		return nil, fmt.Errorf("sandbox: empty program")
 	}
 
+	workDir := cmd.WorkDir
+	if workDir == "" {
+		workDir = s.defaultWorkDir
+	}
+	if workDir != "" {
+		if err := CheckPathAllowed(workDir, policy.AllowedPaths); err != nil {
+			return nil, fmt.Errorf("sandbox: work directory not allowed: %w", err)
+		}
+	}
+
 	timeout := policy.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -34,10 +44,6 @@ func (s *ProcessSandbox) Exec(ctx context.Context, cmd Command, policy Policy) (
 
 	proc := exec.CommandContext(ctx, cmd.Program, cmd.Args...)
 
-	workDir := cmd.WorkDir
-	if workDir == "" {
-		workDir = s.defaultWorkDir
-	}
 	if workDir != "" {
 		proc.Dir = workDir
 	}
