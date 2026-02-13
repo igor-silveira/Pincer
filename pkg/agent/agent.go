@@ -394,7 +394,7 @@ func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
 	for _, m := range history {
 		msgs = append(msgs, r.messageToChat(m))
 	}
-	return msgs
+	return sanitizeToolPairs(msgs)
 }
 
 func (r *Runtime) messageToChat(m store.Message) llm.ChatMessage {

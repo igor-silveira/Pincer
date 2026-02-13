@@ -104,24 +104,30 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 		result[len(selected)-1-i] = s.msg
 	}
 
-	return trimOrphanedToolMessages(result)
+	return sanitizeToolPairs(result)
 }
 
-func trimOrphanedToolMessages(msgs []llm.ChatMessage) []llm.ChatMessage {
-	for len(msgs) > 0 {
-		if len(msgs[0].ToolResults) > 0 {
-			msgs = msgs[1:]
-			continue
-		}
-		if msgs[0].Role == llm.RoleAssistant && len(msgs[0].ToolCalls) > 0 {
-			if len(msgs) < 2 || len(msgs[1].ToolResults) == 0 {
-				msgs = msgs[1:]
+func sanitizeToolPairs(msgs []llm.ChatMessage) []llm.ChatMessage {
+	var result []llm.ChatMessage
+	i := 0
+	for i < len(msgs) {
+		if msgs[i].Role == llm.RoleAssistant && len(msgs[i].ToolCalls) > 0 {
+			if i+1 < len(msgs) && len(msgs[i+1].ToolResults) > 0 {
+				result = append(result, msgs[i], msgs[i+1])
+				i += 2
 				continue
 			}
+			i++
+			continue
 		}
-		break
+		if len(msgs[i].ToolResults) > 0 {
+			i++
+			continue
+		}
+		result = append(result, msgs[i])
+		i++
 	}
-	return msgs
+	return result
 }
 
 func messageToLLM(m store.Message) llm.ChatMessage {
