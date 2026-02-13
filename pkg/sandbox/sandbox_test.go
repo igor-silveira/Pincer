@@ -109,6 +109,46 @@ func TestProcessSandboxTruncation(t *testing.T) {
 	}
 }
 
+func TestProcessSandboxWorkDirAllowed(t *testing.T) {
+	dir := t.TempDir()
+	sb := NewProcessSandbox("")
+	ctx := context.Background()
+
+	policy := Policy{
+		Timeout:      5 * time.Second,
+		AllowedPaths: []string{dir},
+	}
+	result, err := sb.Exec(ctx, Command{
+		Program: "/bin/echo",
+		Args:    []string{"ok"},
+		WorkDir: dir,
+	}, policy)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
+	}
+}
+
+func TestProcessSandboxWorkDirDenied(t *testing.T) {
+	sb := NewProcessSandbox("")
+	ctx := context.Background()
+
+	policy := Policy{
+		Timeout:      5 * time.Second,
+		AllowedPaths: []string{"/tmp/allowed-only"},
+	}
+	_, err := sb.Exec(ctx, Command{
+		Program: "/bin/echo",
+		Args:    []string{"should fail"},
+		WorkDir: "/tmp/not-allowed",
+	}, policy)
+	if err == nil {
+		t.Fatal("expected error for denied work directory")
+	}
+}
+
 func TestDefaultPolicy(t *testing.T) {
 	p := DefaultPolicy()
 	if p.Timeout != 30*time.Second {
