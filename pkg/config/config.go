@@ -105,6 +105,7 @@ func Default() *Config {
 		},
 		Store: StoreConfig{
 			Driver: "sqlite",
+			DSN:    filepath.Join(DataDir(), "pincer.db"),
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -165,7 +166,7 @@ func DataDir() string {
 }
 
 func DefaultConfigPath() string {
-	return filepath.Join(DataDir(), "pincer.toml")
+	return filepath.Join(DataDir(), "pincer.toml.example")
 }
 
 func EnsureDataDir() error {
