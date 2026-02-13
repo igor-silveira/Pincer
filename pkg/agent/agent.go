@@ -24,6 +24,19 @@ import (
 
 const maxToolIterations = 10
 
+type agentCtxKey int
+
+const ctxKeyAutoApprove agentCtxKey = iota
+
+func WithAutoApprove(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyAutoApprove, true)
+}
+
+func autoApproveFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(ctxKeyAutoApprove).(bool)
+	return v
+}
+
 type TurnEvent struct {
 	Type            TurnEventType
 	Token           string
@@ -238,7 +251,7 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		slog.String("id", tc.ID),
 	)
 
-	if r.approver != nil {
+	if r.approver != nil && !autoApproveFromContext(ctx) {
 		req := ApprovalRequest{
 			ID:        uuid.NewString(),
 			SessionID: sessionID,
@@ -290,7 +303,7 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 	if policy.Timeout == 0 {
 		policy = sandbox.DefaultPolicy()
 	}
-	if r.approver != nil && r.approver.mode == ApprovalAuto {
+	if (r.approver != nil && r.approver.mode == ApprovalAuto) || autoApproveFromContext(ctx) {
 		policy.RequireApproval = false
 	}
 

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/channels"
+	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 )
 
@@ -16,14 +19,16 @@ type ChannelRouter struct {
 	adapters []channels.Adapter
 	approver *agent.Approver
 	logger   *slog.Logger
+	store    *store.Store
 }
 
-func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger) *ChannelRouter {
+func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger, db *store.Store) *ChannelRouter {
 	return &ChannelRouter{
 		runtime:  runtime,
 		adapters: adapters,
 		approver: approver,
 		logger:   logger,
+		store:    db,
 	}
 }
 
@@ -70,6 +75,10 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		slog.String("session_id", msg.SessionID),
 		slog.String("peer_id", msg.PeerID),
 	)
+
+	if cr.store != nil {
+		cr.ensureSession(ctx, msg)
+	}
 
 	events, err := cr.runtime.RunTurn(ctx, msg.SessionID, msg.Content)
 	if err != nil {
@@ -140,6 +149,127 @@ func (cr *ChannelRouter) sendApprovalRequest(ctx context.Context, adapter channe
 	}); err != nil {
 		cr.logger.Error("failed to send text approval request",
 			slog.String("channel", adapter.Name()),
+			slog.String("err", err.Error()),
+		)
+	}
+}
+
+func (cr *ChannelRouter) ensureSession(ctx context.Context, msg channels.InboundMessage) {
+	sess, err := cr.store.GetSession(ctx, msg.SessionID)
+	if err == nil {
+		if sess.Channel != msg.ChannelName || sess.PeerID != msg.PeerID {
+			if err := cr.store.UpdateSessionChannel(ctx, msg.SessionID, msg.ChannelName, msg.PeerID); err != nil {
+				cr.logger.Warn("failed to update session channel",
+					slog.String("session_id", msg.SessionID),
+					slog.String("err", err.Error()),
+				)
+			}
+		}
+		return
+	}
+
+	now := time.Now().UTC()
+	newSess := &store.Session{
+		ID:        msg.SessionID,
+		AgentID:   "default",
+		Channel:   msg.ChannelName,
+		PeerID:    msg.PeerID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := cr.store.CreateSession(ctx, newSess); err != nil {
+		cr.logger.Debug("session already exists or create failed",
+			slog.String("session_id", msg.SessionID),
+			slog.String("err", err.Error()),
+		)
+	}
+}
+
+func (cr *ChannelRouter) adapterForSession(ctx context.Context, sessionID string) (channels.Adapter, error) {
+	if cr.store == nil {
+		return nil, fmt.Errorf("no store configured")
+	}
+
+	sess, err := cr.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("looking up session: %w", err)
+	}
+
+	for _, a := range cr.adapters {
+		if a.Name() == sess.Channel {
+			return a, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no adapter found for channel %q", sess.Channel)
+}
+
+func (cr *ChannelRouter) SendToSession(ctx context.Context, sessionID, content string) error {
+	adapter, err := cr.adapterForSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("resolving adapter: %w", err)
+	}
+
+	return adapter.Send(ctx, channels.OutboundMessage{
+		SessionID: sessionID,
+		Content:   content,
+	})
+}
+
+func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt string) {
+	ctx = agent.WithAutoApprove(ctx)
+	logger := telemetry.FromContext(ctx)
+
+	adapter, err := cr.adapterForSession(ctx, sessionID)
+	if err != nil {
+		logger.Error("notify: cannot resolve adapter",
+			slog.String("session_id", sessionID),
+			slog.String("err", err.Error()),
+		)
+		return
+	}
+
+	turnID := uuid.NewString()
+	logger.Info("notify: starting scheduled turn",
+		slog.String("session_id", sessionID),
+		slog.String("turn_id", turnID),
+	)
+
+	events, err := cr.runtime.RunTurn(ctx, sessionID, prompt)
+	if err != nil {
+		logger.Error("notify: agent turn failed",
+			slog.String("session_id", sessionID),
+			slog.String("err", err.Error()),
+		)
+		return
+	}
+
+	var fullResponse string
+	for ev := range events {
+		switch ev.Type {
+		case agent.TurnApprovalNeeded:
+			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
+		case agent.TurnDone:
+			fullResponse = ev.Message
+		case agent.TurnError:
+			logger.Error("notify: agent error during turn",
+				slog.String("session_id", sessionID),
+				slog.String("err", ev.Error.Error()),
+			)
+			fullResponse = "Sorry, I encountered an error processing a scheduled task."
+		}
+	}
+
+	if fullResponse == "" {
+		return
+	}
+
+	if err := adapter.Send(ctx, channels.OutboundMessage{
+		SessionID: sessionID,
+		Content:   fullResponse,
+	}); err != nil {
+		logger.Error("notify: failed to send response",
+			slog.String("session_id", sessionID),
 			slog.String("err", err.Error()),
 		)
 	}

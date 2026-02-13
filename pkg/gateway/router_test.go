@@ -9,6 +9,7 @@ import (
 
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/channels"
+	"github.com/igorsilveira/pincer/pkg/store"
 )
 
 func TestParseTextApproval(t *testing.T) {
@@ -117,7 +118,7 @@ func TestInboundApprovalResponseRoutesToApprover(t *testing.T) {
 	adapter := newFakeAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -166,7 +167,7 @@ func TestTextApprovalRoutesToApprover(t *testing.T) {
 	adapter := newFakeAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -212,7 +213,7 @@ func TestSendApprovalRequestUsesApprovalSender(t *testing.T) {
 	adapter := newFakeApprovalAdapter("test")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
 
 	ctx := context.Background()
 
@@ -247,7 +248,7 @@ func TestSendApprovalRequestFallsBackToText(t *testing.T) {
 	adapter := newFakeAdapter("whatsapp")
 	logger := slog.Default()
 
-	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger)
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, approver, logger, nil)
 
 	ctx := context.Background()
 
@@ -286,4 +287,164 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func testStore(t *testing.T) *store.Store {
+	t.Helper()
+	db, err := store.New(":memory:")
+	if err != nil {
+		t.Fatalf("creating test store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func TestEnsureSessionCreatesWithCorrectChannel(t *testing.T) {
+	db := testStore(t)
+	adapter := newFakeAdapter("telegram")
+	logger := slog.Default()
+
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+
+	ctx := context.Background()
+	msg := channels.InboundMessage{
+		ChannelName: "telegram",
+		SessionID:   "sess-tg-1",
+		PeerID:      "user-42",
+	}
+
+	router.ensureSession(ctx, msg)
+
+	sess, err := db.GetSession(ctx, "sess-tg-1")
+	if err != nil {
+		t.Fatalf("expected session to exist: %v", err)
+	}
+	if sess.Channel != "telegram" {
+		t.Errorf("Channel = %q, want %q", sess.Channel, "telegram")
+	}
+	if sess.PeerID != "user-42" {
+		t.Errorf("PeerID = %q, want %q", sess.PeerID, "user-42")
+	}
+
+	router.ensureSession(ctx, msg)
+	sess2, err := db.GetSession(ctx, "sess-tg-1")
+	if err != nil {
+		t.Fatalf("second lookup failed: %v", err)
+	}
+	if sess2.CreatedAt != sess.CreatedAt {
+		t.Error("ensureSession should not recreate existing session")
+	}
+}
+
+func TestEnsureSessionFixesStaleChannel(t *testing.T) {
+	db := testStore(t)
+	adapter := newFakeAdapter("telegram")
+	logger := slog.Default()
+
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	if err := db.CreateSession(ctx, &store.Session{
+		ID:        "sess-tg-stale",
+		AgentID:   "default",
+		Channel:   "webchat",
+		PeerID:    "anonymous",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("creating stale session: %v", err)
+	}
+
+	msg := channels.InboundMessage{
+		ChannelName: "telegram",
+		SessionID:   "sess-tg-stale",
+		PeerID:      "user-42",
+	}
+	router.ensureSession(ctx, msg)
+
+	sess, err := db.GetSession(ctx, "sess-tg-stale")
+	if err != nil {
+		t.Fatalf("expected session to exist: %v", err)
+	}
+	if sess.Channel != "telegram" {
+		t.Errorf("Channel = %q, want %q", sess.Channel, "telegram")
+	}
+	if sess.PeerID != "user-42" {
+		t.Errorf("PeerID = %q, want %q", sess.PeerID, "user-42")
+	}
+}
+
+func TestSendToSessionRoutesToCorrectAdapter(t *testing.T) {
+	db := testStore(t)
+	tgAdapter := newFakeAdapter("telegram")
+	dcAdapter := newFakeAdapter("discord")
+	logger := slog.Default()
+
+	router := NewChannelRouter(nil, []channels.Adapter{tgAdapter, dcAdapter}, nil, logger, db)
+
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	if err := db.CreateSession(ctx, &store.Session{
+		ID:        "sess-dc-1",
+		AgentID:   "default",
+		Channel:   "discord",
+		PeerID:    "user-99",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+
+	if err := router.SendToSession(ctx, "sess-dc-1", "hello discord"); err != nil {
+		t.Fatalf("SendToSession failed: %v", err)
+	}
+
+	dcSent := dcAdapter.getSent()
+	if len(dcSent) != 1 {
+		t.Fatalf("expected 1 message to discord, got %d", len(dcSent))
+	}
+	if dcSent[0].Content != "hello discord" {
+		t.Errorf("Content = %q, want %q", dcSent[0].Content, "hello discord")
+	}
+	if dcSent[0].SessionID != "sess-dc-1" {
+		t.Errorf("SessionID = %q, want %q", dcSent[0].SessionID, "sess-dc-1")
+	}
+
+	tgSent := tgAdapter.getSent()
+	if len(tgSent) != 0 {
+		t.Errorf("expected 0 messages to telegram, got %d", len(tgSent))
+	}
+}
+
+func TestSendToSessionErrorsOnUnknownChannel(t *testing.T) {
+	db := testStore(t)
+	adapter := newFakeAdapter("telegram")
+	logger := slog.Default()
+
+	router := NewChannelRouter(nil, []channels.Adapter{adapter}, nil, logger, db)
+
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	if err := db.CreateSession(ctx, &store.Session{
+		ID:        "sess-slack-1",
+		AgentID:   "default",
+		Channel:   "slack",
+		PeerID:    "user-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("creating session: %v", err)
+	}
+
+	err := router.SendToSession(ctx, "sess-slack-1", "hi")
+	if err == nil {
+		t.Fatal("expected error when no adapter matches channel")
+	}
+	if !contains(err.Error(), "no adapter found") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }
