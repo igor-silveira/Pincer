@@ -44,9 +44,11 @@ type ChannelConfig struct {
 }
 
 type SandboxConfig struct {
-	Mode          string `toml:"mode"`
-	NetworkPolicy string `toml:"network_policy"`
-	MaxTimeout    string `toml:"max_timeout"`
+	Mode          string   `toml:"mode"`
+	NetworkPolicy string   `toml:"network_policy"`
+	MaxTimeout    string   `toml:"max_timeout"`
+	AllowedPaths  []string `toml:"allowed_paths"`
+	ReadOnlyPaths []string `toml:"read_only_paths"`
 }
 
 type MemoryConfig struct {
