@@ -440,7 +440,7 @@ func buildAgentCard(cfg *config.Config, registry *tools.Registry, soulDef *soul.
 }
 
 func initMCPServers(ctx context.Context, cfg *config.Config, logger *slog.Logger, registry *tools.Registry, auditLog *audit.Logger) *mcp.Manager {
-	if len(cfg.MCP.Servers) == 0 {
+	if !cfg.MCP.Enabled || len(cfg.MCP.Servers) == 0 {
 		return nil
 	}
 

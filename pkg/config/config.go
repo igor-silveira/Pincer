@@ -90,6 +90,7 @@ type SoulConfig struct {
 }
 
 type MCPConfig struct {
+	Enabled bool              `toml:"enabled"`
 	Servers []MCPServerConfig `toml:"servers"`
 }
 
