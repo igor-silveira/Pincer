@@ -168,7 +168,7 @@ func (a *Adapter) handleInteraction(s *discordgo.Session, i *discordgo.Interacti
 		status = "Denied"
 	}
 
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
 			Content:    i.Message.Content + "\n\n**" + status + "**",
