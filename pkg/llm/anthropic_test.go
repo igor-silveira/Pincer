@@ -42,7 +42,7 @@ func TestAnthropicChat_FullResponse(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(respData)
+		_, _ = w.Write(respData)
 	}))
 	defer srv.Close()
 
@@ -97,7 +97,7 @@ func TestAnthropicChat_StreamResponse(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Write([]byte(sseData))
+		_, _ = w.Write([]byte(sseData))
 	}))
 	defer srv.Close()
 
