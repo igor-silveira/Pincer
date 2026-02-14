@@ -290,71 +290,47 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+type adapterEntry struct {
+	name   string
+	envVar string
+	create func(cfg *config.Config) (channels.Adapter, error)
+}
+
 func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.Logger) []channels.Adapter {
+	entries := []adapterEntry{
+		{"telegram", "TELEGRAM_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return telegram.New(channelToken(c, "telegram"))
+		}},
+		{"discord", "DISCORD_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return discord.New(channelToken(c, "discord"))
+		}},
+		{"slack", "SLACK_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return slackadapter.New(channelToken(c, "slack"), os.Getenv("SLACK_APP_TOKEN"))
+		}},
+		{"whatsapp", "WHATSAPP_DB_PATH", func(c *config.Config) (channels.Adapter, error) {
+			return whatsapp.New("")
+		}},
+		{"matrix", "MATRIX_HOMESERVER", func(c *config.Config) (channels.Adapter, error) {
+			return matrix.New(matrix.Config{})
+		}},
+	}
+
 	var adapters []channels.Adapter
-
-	if channelEnabled(cfg, "telegram") || os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
-		token := channelToken(cfg, "telegram")
-		tg, err := telegram.New(token)
-		if err != nil {
-			logger.Warn("telegram adapter skipped", slog.String("err", err.Error()))
-		} else if err := tg.Start(ctx); err != nil {
-			logger.Error("telegram adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("telegram adapter enabled")
-			adapters = append(adapters, tg)
+	for _, e := range entries {
+		if !channelEnabled(cfg, e.name) && os.Getenv(e.envVar) == "" {
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "discord") || os.Getenv("DISCORD_BOT_TOKEN") != "" {
-		token := channelToken(cfg, "discord")
-		dc, err := discord.New(token)
+		a, err := e.create(cfg)
 		if err != nil {
-			logger.Warn("discord adapter skipped", slog.String("err", err.Error()))
-		} else if err := dc.Start(ctx); err != nil {
-			logger.Error("discord adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("discord adapter enabled")
-			adapters = append(adapters, dc)
+			logger.Warn(e.name+" adapter skipped", slog.String("err", err.Error()))
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "slack") || os.Getenv("SLACK_BOT_TOKEN") != "" {
-		botToken := channelToken(cfg, "slack")
-		appToken := os.Getenv("SLACK_APP_TOKEN")
-		sl, err := slackadapter.New(botToken, appToken)
-		if err != nil {
-			logger.Warn("slack adapter skipped", slog.String("err", err.Error()))
-		} else if err := sl.Start(ctx); err != nil {
-			logger.Error("slack adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("slack adapter enabled")
-			adapters = append(adapters, sl)
+		if err := a.Start(ctx); err != nil {
+			logger.Error(e.name+" adapter failed to start", slog.String("err", err.Error()))
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "whatsapp") || os.Getenv("WHATSAPP_DB_PATH") != "" {
-		wa, err := whatsapp.New("")
-		if err != nil {
-			logger.Warn("whatsapp adapter skipped", slog.String("err", err.Error()))
-		} else if err := wa.Start(ctx); err != nil {
-			logger.Error("whatsapp adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("whatsapp adapter enabled")
-			adapters = append(adapters, wa)
-		}
-	}
-
-	if channelEnabled(cfg, "matrix") || os.Getenv("MATRIX_HOMESERVER") != "" {
-		mx, err := matrix.New(matrix.Config{})
-		if err != nil {
-			logger.Warn("matrix adapter skipped", slog.String("err", err.Error()))
-		} else if err := mx.Start(ctx); err != nil {
-			logger.Error("matrix adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("matrix adapter enabled")
-			adapters = append(adapters, mx)
-		}
+		logger.Info(e.name + " adapter enabled")
+		adapters = append(adapters, a)
 	}
 
 	return adapters
