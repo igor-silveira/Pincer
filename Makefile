@@ -9,16 +9,16 @@ PORT      := 18789
 all: vet test build
 
 build:
-	go build -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY) .
+	go build -mod=vendor -ldflags="$(LDFLAGS)" -trimpath -o $(BINARY) .
 
 run: build
 	./$(BINARY) start
 
 test:
-	go test ./...
+	go test -mod=vendor ./...
 
 vet:
-	go vet ./...
+	go vet -mod=vendor ./...
 
 lint:
 	golangci-lint run ./...
