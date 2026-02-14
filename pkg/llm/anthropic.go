@@ -28,11 +28,11 @@ func NewAnthropicProvider(apiKey, baseURL string) (*AnthropicProvider, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("anthropic: API key not set (provide it or set ANTHROPIC_API_KEY)")
-	}
 	if baseURL == "" {
 		baseURL = anthropicDefaultBaseURL
+	}
+	if apiKey == "" && baseURL == anthropicDefaultBaseURL {
+		return nil, fmt.Errorf("anthropic: API key not set (provide it or set ANTHROPIC_API_KEY)")
 	}
 	return &AnthropicProvider{
 		apiKey:     apiKey,
