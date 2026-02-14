@@ -2,7 +2,6 @@ package llm
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -118,40 +117,18 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 		apiReq.Messages = append(apiReq.Messages, convertToAnthropicMessage(m))
 	}
 
-	body, err := json.Marshal(apiReq)
+	resp, err := doLLMRequest(ctx, a.httpClient, "anthropic", a.baseURL+anthropicMessagesPath, map[string]string{
+		"X-Api-Key":         a.apiKey,
+		"Anthropic-Version": anthropicAPIVersion,
+	}, apiReq)
 	if err != nil {
-		return nil, fmt.Errorf("anthropic: marshaling request: %w", err)
+		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+anthropicMessagesPath, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: creating request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Api-Key", a.apiKey)
-	httpReq.Header.Set("Anthropic-Version", anthropicAPIVersion)
-
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic: sending request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic: API returned %d: %s", resp.StatusCode, string(errBody))
-	}
-
-	ch := make(chan ChatEvent, 64)
-
-	if req.Stream {
-		go a.readStream(ctx, resp.Body, ch)
-	} else {
-		go a.readFull(resp.Body, ch)
-	}
-
-	return ch, nil
+	return dispatchResponse(resp, req.Stream,
+		func(body io.ReadCloser, ch chan<- ChatEvent) { a.readStream(ctx, body, ch) },
+		func(body io.ReadCloser, ch chan<- ChatEvent) { a.readFull(body, ch) },
+	), nil
 }
 
 func convertToAnthropicMessage(m ChatMessage) anthropicMessage {

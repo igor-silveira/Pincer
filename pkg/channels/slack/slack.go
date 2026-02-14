@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -21,8 +20,7 @@ type Adapter struct {
 	client   *slackapi.Client
 	socket   *socketmode.Client
 	inbound  chan channels.InboundMessage
-	sessions map[string]string
-	mu       sync.RWMutex
+	sessions *channels.SessionMap[string]
 	done     chan struct{}
 }
 
@@ -40,7 +38,7 @@ func New(botToken, appToken string) (*Adapter, error) {
 		botToken: botToken,
 		appToken: appToken,
 		inbound:  make(chan channels.InboundMessage, 256),
-		sessions: make(map[string]string),
+		sessions: channels.NewSessionMap[string]("sl", func(k string) string { return k }),
 		done:     make(chan struct{}),
 	}, nil
 }
@@ -74,17 +72,8 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("slack: not connected")
 	}
 
-	a.mu.RLock()
-	var channelID string
-	for cid, sid := range a.sessions {
-		if sid == msg.SessionID {
-			channelID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if channelID == "" {
+	channelID, ok := a.sessions.Reverse(msg.SessionID)
+	if !ok {
 		return fmt.Errorf("slack: no channel for session %s", msg.SessionID)
 	}
 
@@ -111,17 +100,8 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 		return fmt.Errorf("slack: not connected")
 	}
 
-	a.mu.RLock()
-	var channelID string
-	for cid, sid := range a.sessions {
-		if sid == req.SessionID {
-			channelID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if channelID == "" {
+	channelID, ok := a.sessions.Reverse(req.SessionID)
+	if !ok {
 		return fmt.Errorf("slack: no channel for session %s", req.SessionID)
 	}
 
@@ -197,7 +177,7 @@ func (a *Adapter) handleInteraction(callback slackapi.InteractionCallback) {
 	approved := act == "approve"
 
 	channelID := callback.Channel.ID
-	sessionID := a.sessionForChannel(channelID)
+	sessionID, _ := a.sessions.Lookup(channelID)
 
 	a.inbound <- channels.InboundMessage{
 		ChannelName: "slack",
@@ -220,7 +200,7 @@ func (a *Adapter) handleEventsAPI(event slackevents.EventsAPIEvent) {
 				return
 			}
 
-			sessionID := a.getOrCreateSession(ev.Channel)
+			sessionID := a.sessions.GetOrCreate(ev.Channel)
 
 			slog.Debug("slack message received",
 				slog.String("channel", ev.Channel),
@@ -237,29 +217,3 @@ func (a *Adapter) handleEventsAPI(event slackevents.EventsAPIEvent) {
 	}
 }
 
-func (a *Adapter) getOrCreateSession(channelID string) string {
-	a.mu.RLock()
-	sid, ok := a.sessions[channelID]
-	a.mu.RUnlock()
-
-	if ok {
-		return sid
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if sid, ok := a.sessions[channelID]; ok {
-		return sid
-	}
-
-	sid = fmt.Sprintf("sl-%s", channelID)
-	a.sessions[channelID] = sid
-	return sid
-}
-
-func (a *Adapter) sessionForChannel(channelID string) string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.sessions[channelID]
-}
