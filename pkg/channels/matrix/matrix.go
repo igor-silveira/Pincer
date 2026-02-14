@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -19,8 +18,7 @@ type Adapter struct {
 	userID     string
 	token      string
 	inbound    chan channels.InboundMessage
-	sessions   map[id.RoomID]string
-	mu         sync.RWMutex
+	sessions   *channels.SessionMap[id.RoomID]
 }
 
 type Config struct {
@@ -49,7 +47,7 @@ func New(cfg Config) (*Adapter, error) {
 		userID:     cfg.UserID,
 		token:      cfg.AccessToken,
 		inbound:    make(chan channels.InboundMessage, 256),
-		sessions:   make(map[id.RoomID]string),
+		sessions:   channels.NewSessionMap[id.RoomID]("mx", func(k id.RoomID) string { return string(k) }),
 	}, nil
 }
 
@@ -88,17 +86,8 @@ func (a *Adapter) Stop(_ context.Context) error {
 }
 
 func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error {
-	a.mu.RLock()
-	var roomID id.RoomID
-	for rid, sid := range a.sessions {
-		if sid == msg.SessionID {
-			roomID = rid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if roomID == "" {
+	roomID, ok := a.sessions.Reverse(msg.SessionID)
+	if !ok {
 		return fmt.Errorf("matrix: no room for session %s", msg.SessionID)
 	}
 
@@ -129,7 +118,7 @@ func (a *Adapter) handleMessage(evt *event.Event) {
 		return
 	}
 
-	sessionID := a.getOrCreateSession(evt.RoomID)
+	sessionID := a.sessions.GetOrCreate(evt.RoomID)
 
 	a.inbound <- channels.InboundMessage{
 		ChannelName: "matrix",
@@ -139,23 +128,3 @@ func (a *Adapter) handleMessage(evt *event.Event) {
 	}
 }
 
-func (a *Adapter) getOrCreateSession(roomID id.RoomID) string {
-	a.mu.RLock()
-	sid, ok := a.sessions[roomID]
-	a.mu.RUnlock()
-
-	if ok {
-		return sid
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if sid, ok := a.sessions[roomID]; ok {
-		return sid
-	}
-
-	sid = fmt.Sprintf("mx-%s", roomID)
-	a.sessions[roomID] = sid
-	return sid
-}

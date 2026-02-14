@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -19,8 +18,7 @@ type Adapter struct {
 	token    string
 	bot      *bot.Bot
 	inbound  chan channels.InboundMessage
-	sessions map[int64]string
-	mu       sync.RWMutex
+	sessions *channels.SessionMap[int64]
 }
 
 func New(token string) (*Adapter, error) {
@@ -33,7 +31,7 @@ func New(token string) (*Adapter, error) {
 	return &Adapter{
 		token:    token,
 		inbound:  make(chan channels.InboundMessage, 256),
-		sessions: make(map[int64]string),
+		sessions: channels.NewSessionMap[int64]("tg", func(k int64) string { return fmt.Sprintf("%d", k) }),
 	}, nil
 }
 
@@ -65,18 +63,8 @@ func (a *Adapter) Stop(ctx context.Context) error {
 }
 
 func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error {
-
-	a.mu.RLock()
-	var chatID int64
-	for cid, sid := range a.sessions {
-		if sid == msg.SessionID {
-			chatID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if chatID == 0 {
+	chatID, ok := a.sessions.Reverse(msg.SessionID)
+	if !ok {
 		return fmt.Errorf("telegram: no chat for session %s", msg.SessionID)
 	}
 
@@ -100,17 +88,8 @@ func (a *Adapter) Capabilities() channels.ChannelCaps {
 }
 
 func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.ApprovalRequest) error {
-	a.mu.RLock()
-	var chatID int64
-	for cid, sid := range a.sessions {
-		if sid == req.SessionID {
-			chatID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if chatID == 0 {
+	chatID, ok := a.sessions.Reverse(req.SessionID)
+	if !ok {
 		return fmt.Errorf("telegram: no chat for session %s", req.SessionID)
 	}
 
@@ -177,7 +156,7 @@ func (a *Adapter) handleCallbackQuery(ctx context.Context, b *bot.Bot, update *m
 		})
 	}
 
-	sessionID := a.sessionForChat(update.CallbackQuery.Message.Message.Chat.ID)
+	sessionID, _ := a.sessions.Lookup(update.CallbackQuery.Message.Message.Chat.ID)
 	peerID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
 
 	a.inbound <- channels.InboundMessage{
@@ -199,7 +178,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, b *bot.Bot, update *models.U
 	chatID := update.Message.Chat.ID
 	peerID := fmt.Sprintf("%d", update.Message.From.ID)
 
-	sessionID := a.getOrCreateSession(chatID)
+	sessionID := a.sessions.GetOrCreate(chatID)
 
 	slog.Debug("telegram message received",
 		slog.Int64("chat_id", chatID),
@@ -214,29 +193,3 @@ func (a *Adapter) handleUpdate(ctx context.Context, b *bot.Bot, update *models.U
 	}
 }
 
-func (a *Adapter) getOrCreateSession(chatID int64) string {
-	a.mu.RLock()
-	sid, ok := a.sessions[chatID]
-	a.mu.RUnlock()
-
-	if ok {
-		return sid
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if sid, ok := a.sessions[chatID]; ok {
-		return sid
-	}
-
-	sid = fmt.Sprintf("tg-%d", chatID)
-	a.sessions[chatID] = sid
-	return sid
-}
-
-func (a *Adapter) sessionForChat(chatID int64) string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.sessions[chatID]
-}
