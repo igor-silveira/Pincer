@@ -231,7 +231,7 @@ Pass `--build-arg VERSION=x.y.z` to embed a specific version at build time.
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.26+
 - Chrome/Chromium (optional, for browser tool)
 - Docker (optional, for container sandbox)
 
