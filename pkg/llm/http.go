@@ -31,7 +31,7 @@ func doLLMRequest(ctx context.Context, client *http.Client, providerName, url st
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		defer func() { _ = resp.Body.Close() }()
+		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("%s: API returned %d: %s", providerName, resp.StatusCode, string(errBody))
 	}

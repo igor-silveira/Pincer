@@ -178,11 +178,11 @@ func TestAutoMigrateIdempotentIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first New: %v", err)
 	}
-	_ = s1.Close()
+	s1.Close()
 
 	s2, err := store.New(dsn)
 	if err != nil {
 		t.Fatalf("second New: %v", err)
 	}
-	_ = s2.Close()
+	s2.Close()
 }

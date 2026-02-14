@@ -45,13 +45,13 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating backup file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 
 	gw := gzip.NewWriter(f)
-	defer func() { _ = gw.Close() }()
+	defer gw.Close()
 
 	tw := tar.NewWriter(gw)
-	defer func() { _ = tw.Close() }()
+	defer tw.Close()
 
 	count := 0
 	err = filepath.Walk(dataDir, func(path string, info os.FileInfo, err error) error {
@@ -86,7 +86,7 @@ func runBackup(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		defer func() { _ = file.Close() }()
+		defer file.Close()
 
 		if _, err := io.Copy(tw, file); err != nil {
 			return err
@@ -112,7 +112,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("opening backup: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer f.Close()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {

@@ -81,7 +81,7 @@ func (wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = fmt.Fprint(w, `{"status":"accepted","handled":false}`)
+		fmt.Fprint(w, `{"status":"accepted","handled":false}`)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, `{"status":"ok","handled":true}`)
+	fmt.Fprint(w, `{"status":"ok","handled":true}`)
 }
 
 func (wh *WebhookHandler) verifySignature(body []byte, signature string) bool {
