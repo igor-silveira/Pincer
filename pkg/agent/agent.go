@@ -336,7 +336,7 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 	}
 }
 
-func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logger, sessionID, content string, usage *llm.Usage) {
+func (r *Runtime) persistMessage(ctx context.Context, logger *slog.Logger, sessionID, role, contentType, content string, usage *llm.Usage) {
 	tokenCount := 0
 	if usage != nil {
 		tokenCount = usage.OutputTokens
@@ -345,18 +345,25 @@ func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logg
 	msg := &store.Message{
 		ID:          uuid.NewString(),
 		SessionID:   sessionID,
-		Role:        llm.RoleAssistant,
-		ContentType: store.ContentTypeText,
+		Role:        role,
+		ContentType: contentType,
 		Content:     content,
 		TokenCount:  tokenCount,
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
-		logger.Error("failed to persist assistant message", slog.String("err", err.Error()))
+	if err := r.store.AppendMessage(ctx, msg); err != nil {
+		logger.Error("failed to persist message",
+			slog.String("content_type", contentType),
+			slog.String("err", err.Error()),
+		)
 	}
+}
 
-	if err := r.store.TouchSession(context.Background(), sessionID); err != nil {
+func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logger, sessionID, content string, usage *llm.Usage) {
+	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeText, content, usage)
+
+	if err := r.store.TouchSession(ctx, sessionID); err != nil {
 		logger.Error("failed to touch session", slog.String("err", err.Error()))
 	}
 }
@@ -370,80 +377,21 @@ func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logge
 		ToolCalls: toolCalls,
 	})
 
-	tokenCount := 0
-	if usage != nil {
-		tokenCount = usage.OutputTokens
-	}
-
-	msg := &store.Message{
-		ID:          uuid.NewString(),
-		SessionID:   sessionID,
-		Role:        llm.RoleAssistant,
-		ContentType: store.ContentTypeToolCalls,
-		Content:     string(data),
-		TokenCount:  tokenCount,
-		CreatedAt:   time.Now().UTC(),
-	}
-
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
-		logger.Error("failed to persist tool call message", slog.String("err", err.Error()))
-	}
+	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
 }
 
 func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Logger, sessionID string, results []llm.ToolResult) {
 	data, _ := json.Marshal(results)
 
-	msg := &store.Message{
-		ID:          uuid.NewString(),
-		SessionID:   sessionID,
-		Role:        llm.RoleUser,
-		ContentType: store.ContentTypeToolResults,
-		Content:     string(data),
-		CreatedAt:   time.Now().UTC(),
-	}
-
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
-		logger.Error("failed to persist tool result message", slog.String("err", err.Error()))
-	}
+	r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
 }
 
 func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
 	msgs := make([]llm.ChatMessage, 0, len(history))
 	for _, m := range history {
-		msgs = append(msgs, r.messageToChat(m))
+		msgs = append(msgs, messageToLLM(m))
 	}
 	return sanitizeToolPairs(msgs)
-}
-
-func (r *Runtime) messageToChat(m store.Message) llm.ChatMessage {
-	switch m.ContentType {
-	case store.ContentTypeToolCalls:
-		var data struct {
-			Text      string         `json:"text,omitempty"`
-			ToolCalls []llm.ToolCall `json:"tool_calls"`
-		}
-		if err := json.Unmarshal([]byte(m.Content), &data); err == nil {
-			return llm.ChatMessage{
-				Role:      m.Role,
-				Content:   data.Text,
-				ToolCalls: data.ToolCalls,
-			}
-		}
-
-	case store.ContentTypeToolResults:
-		var results []llm.ToolResult
-		if err := json.Unmarshal([]byte(m.Content), &results); err == nil {
-			return llm.ChatMessage{
-				Role:        m.Role,
-				ToolResults: results,
-			}
-		}
-	}
-
-	return llm.ChatMessage{
-		Role:    m.Role,
-		Content: m.Content,
-	}
 }
 
 func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*store.Session, error) {

@@ -2,7 +2,6 @@ package llm
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -141,37 +140,15 @@ func (g *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 		url = fmt.Sprintf("%s/models/%s:%s?key=%s", geminiBaseURL, model, action, g.apiKey)
 	}
 
-	body, err := json.Marshal(apiReq)
+	resp, err := doLLMRequest(ctx, g.httpClient, "gemini", url, nil, apiReq)
 	if err != nil {
-		return nil, fmt.Errorf("gemini: marshaling request: %w", err)
+		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("gemini: creating request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := g.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("gemini: sending request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gemini: API returned %d: %s", resp.StatusCode, string(errBody))
-	}
-
-	ch := make(chan ChatEvent, 64)
-
-	if req.Stream {
-		go g.readStream(ctx, resp.Body, ch)
-	} else {
-		go g.readFull(resp.Body, ch)
-	}
-
-	return ch, nil
+	return dispatchResponse(resp, req.Stream,
+		func(body io.ReadCloser, ch chan<- ChatEvent) { g.readStream(ctx, body, ch) },
+		func(body io.ReadCloser, ch chan<- ChatEvent) { g.readFull(body, ch) },
+	), nil
 }
 
 func convertToGeminiContent(m ChatMessage) geminiContent {

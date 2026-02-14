@@ -35,9 +35,9 @@ func (t *FileReadTool) Definition() llm.ToolDefinition {
 }
 
 func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage, sb sandbox.Sandbox, policy sandbox.Policy) (string, error) {
-	var params fileReadInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("file_read: invalid input: %w", err)
+	params, err := parseInput[fileReadInput](input, "file_read")
+	if err != nil {
+		return "", err
 	}
 
 	if params.Path == "" {
@@ -104,9 +104,9 @@ func (t *FileWriteTool) Definition() llm.ToolDefinition {
 }
 
 func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage, sb sandbox.Sandbox, policy sandbox.Policy) (string, error) {
-	var params fileWriteInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("file_write: invalid input: %w", err)
+	params, err := parseInput[fileWriteInput](input, "file_write")
+	if err != nil {
+		return "", err
 	}
 
 	if params.Path == "" {

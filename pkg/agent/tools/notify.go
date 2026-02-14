@@ -49,9 +49,9 @@ func (t *NotifyTool) Definition() llm.ToolDefinition {
 }
 
 func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandbox.Sandbox, _ sandbox.Policy) (string, error) {
-	var params notifyInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("notify: invalid input: %w", err)
+	params, err := parseInput[notifyInput](input, "notify")
+	if err != nil {
+		return "", err
 	}
 
 	sessionID := SessionIDFromContext(ctx)

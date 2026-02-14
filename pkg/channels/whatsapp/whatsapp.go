@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"go.mau.fi/whatsmeow"
@@ -19,8 +18,7 @@ type Adapter struct {
 	client   *whatsmeow.Client
 	dbPath   string
 	inbound  chan channels.InboundMessage
-	sessions map[types.JID]string
-	mu       sync.RWMutex
+	sessions *channels.SessionMap[types.JID]
 }
 
 func New(dbPath string) (*Adapter, error) {
@@ -33,7 +31,7 @@ func New(dbPath string) (*Adapter, error) {
 	return &Adapter{
 		dbPath:   dbPath,
 		inbound:  make(chan channels.InboundMessage, 256),
-		sessions: make(map[types.JID]string),
+		sessions: channels.NewSessionMap[types.JID]("wa", func(k types.JID) string { return k.User }),
 	}, nil
 }
 
@@ -83,17 +81,8 @@ func (a *Adapter) Stop(_ context.Context) error {
 }
 
 func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error {
-	a.mu.RLock()
-	var jid types.JID
-	for j, sid := range a.sessions {
-		if sid == msg.SessionID {
-			jid = j
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if jid.IsEmpty() {
+	jid, ok := a.sessions.Reverse(msg.SessionID)
+	if !ok {
 		return fmt.Errorf("whatsapp: no chat for session %s", msg.SessionID)
 	}
 
@@ -131,7 +120,7 @@ func (a *Adapter) handleEvent(evt interface{}) {
 			return
 		}
 
-		sessionID := a.getOrCreateSession(v.Info.Sender)
+		sessionID := a.sessions.GetOrCreate(v.Info.Sender)
 
 		a.inbound <- channels.InboundMessage{
 			ChannelName: "whatsapp",
@@ -142,23 +131,3 @@ func (a *Adapter) handleEvent(evt interface{}) {
 	}
 }
 
-func (a *Adapter) getOrCreateSession(jid types.JID) string {
-	a.mu.RLock()
-	sid, ok := a.sessions[jid]
-	a.mu.RUnlock()
-
-	if ok {
-		return sid
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if sid, ok := a.sessions[jid]; ok {
-		return sid
-	}
-
-	sid = fmt.Sprintf("wa-%s", jid.User)
-	a.sessions[jid] = sid
-	return sid
-}

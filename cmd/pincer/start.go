@@ -40,6 +40,148 @@ var startCmd = &cobra.Command{
 	RunE:  runStart,
 }
 
+type storeDeps struct {
+	db        *store.Store
+	auditLog  *audit.Logger
+	mem       *memory.Store
+	credStore *credentials.Store
+}
+
+func initStorage(cfg *config.Config, logger *slog.Logger) (*storeDeps, error) {
+	db, err := store.New(cfg.Store.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("opening store: %w", err)
+	}
+	logger.Info("store ready", slog.String("dsn", cfg.Store.DSN))
+
+	auditLog, err := audit.New(db.DB())
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("initializing audit logger: %w", err)
+	}
+	logger.Info("audit logger ready")
+
+	mem := memory.New(db.DB(), cfg.Memory.ImmutableKeys)
+	logger.Info("memory system ready",
+		slog.Int("immutable_keys", len(cfg.Memory.ImmutableKeys)),
+	)
+
+	masterKeyEnv := cfg.Credentials.MasterKeyEnv
+	if masterKeyEnv == "" {
+		masterKeyEnv = "PINCER_MASTER_KEY"
+	}
+	masterKey := os.Getenv(masterKeyEnv)
+	var credStore *credentials.Store
+	if masterKey != "" {
+		credStore, err = credentials.New(db.DB(), masterKey)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("initializing credential store: %w", err)
+		}
+		logger.Info("credential store ready")
+	} else {
+		logger.Warn("credential store disabled (set PINCER_MASTER_KEY to enable)")
+	}
+
+	return &storeDeps{db: db, auditLog: auditLog, mem: mem, credStore: credStore}, nil
+}
+
+func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps *storeDeps) (*agent.Runtime, *tools.Registry, *agent.Approver, error) {
+	soulPath := cfg.Soul.Path
+	if soulPath == "" {
+		soulPath = filepath.Join(config.DataDir(), "soul.toml")
+	}
+	soulDef, err := soul.Load(soulPath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("loading soul: %w", err)
+	}
+	if err := soulDef.SeedMemory(ctx, deps.mem, "default"); err != nil {
+		logger.Warn("soul memory seeding had errors", slog.String("err", err.Error()))
+	}
+	logger.Info("soul loaded",
+		slog.String("name", soulDef.Identity.Name),
+		slog.String("role", soulDef.Identity.Role),
+	)
+
+	provider, err := createProvider(cfg, logger)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating LLM provider: %w", err)
+	}
+	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
+
+	sb, err := createSandbox(cfg)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("creating sandbox: %w", err)
+	}
+	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
+
+	registry := tools.DefaultRegistry()
+	registry.Register(&tools.MemoryTool{Memory: deps.mem})
+	registry.Register(&tools.SoulTool{Soul: soulDef})
+	if deps.credStore != nil {
+		registry.Register(&tools.CredentialTool{Credentials: deps.credStore})
+	}
+
+	skillDir := cfg.Skills.Dir
+	if skillDir == "" {
+		skillDir = filepath.Join(config.DataDir(), "skills")
+	}
+	engine := skills.NewEngine(skills.EngineConfig{
+		SkillDir:      skillDir,
+		AllowUnsigned: cfg.Skills.AllowUnsigned,
+	})
+	results, err := engine.LoadAll()
+	if err != nil {
+		logger.Warn("skill loading had errors", slog.String("err", err.Error()))
+	}
+	for _, r := range results {
+		logger.Info("skill loaded",
+			slog.String("skill", r.SkillName),
+			slog.Bool("safe", r.Safe),
+			slog.Int("findings", len(r.Findings)),
+		)
+		_ = deps.auditLog.Log(ctx, audit.EventSkillLoad, "", "", "system",
+			fmt.Sprintf("skill=%s safe=%v findings=%d", r.SkillName, r.Safe, len(r.Findings)))
+	}
+
+	systemPrompt := soulDef.Render()
+	if cfg.Agent.SystemPrompt != "" {
+		systemPrompt += "\n" + cfg.Agent.SystemPrompt
+	}
+	for _, sk := range engine.List() {
+		if sk.Prompt != "" {
+			systemPrompt += "\n\n" + sk.Prompt
+		}
+	}
+
+	logger.Info("skill engine ready",
+		slog.Int("skills", len(engine.List())),
+		slog.Int("tools", len(registry.Definitions())),
+	)
+
+	approvalMode := agent.ApprovalMode(cfg.Agent.ToolApproval)
+	approver := agent.NewApprover(approvalMode, nil)
+
+	runtime := agent.NewRuntime(agent.RuntimeConfig{
+		Provider:      provider,
+		Store:         deps.db,
+		Registry:      registry,
+		Sandbox:       sb,
+		Approver:      approver,
+		Model:         cfg.Agent.Model,
+		MaxTokens:     cfg.Agent.MaxContextTokens,
+		SystemPrompt:  systemPrompt,
+		Memory:        deps.mem,
+		Audit:         deps.auditLog,
+		DefaultPolicy: buildDefaultPolicy(cfg),
+	})
+
+	_ = deps.auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
+		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
+
+	return runtime, registry, approver, nil
+}
+
 func runStart(cmd *cobra.Command, args []string) error {
 	path := cfgFile
 	if path == "" {
@@ -80,131 +222,16 @@ func runStart(cmd *cobra.Command, args []string) error {
 		logger.Info("opentelemetry tracing enabled", slog.String("endpoint", cfg.Tracing.Endpoint))
 	}
 
-	db, err := store.New(cfg.Store.DSN)
+	deps, err := initStorage(cfg, logger)
 	if err != nil {
-		return fmt.Errorf("opening store: %w", err)
+		return err
 	}
-	defer db.Close()
-	logger.Info("store ready", slog.String("dsn", cfg.Store.DSN))
+	defer deps.db.Close()
 
-	auditLog, err := audit.New(db.DB())
+	runtime, registry, approver, err := initAgent(ctx, cfg, logger, deps)
 	if err != nil {
-		return fmt.Errorf("initializing audit logger: %w", err)
+		return err
 	}
-	logger.Info("audit logger ready")
-
-	mem := memory.New(db.DB(), cfg.Memory.ImmutableKeys)
-	logger.Info("memory system ready",
-		slog.Int("immutable_keys", len(cfg.Memory.ImmutableKeys)),
-	)
-
-	masterKeyEnv := cfg.Credentials.MasterKeyEnv
-	if masterKeyEnv == "" {
-		masterKeyEnv = "PINCER_MASTER_KEY"
-	}
-	masterKey := os.Getenv(masterKeyEnv)
-	var credStore *credentials.Store
-	if masterKey != "" {
-		credStore, err = credentials.New(db.DB(), masterKey)
-		if err != nil {
-			return fmt.Errorf("initializing credential store: %w", err)
-		}
-		logger.Info("credential store ready")
-	} else {
-		logger.Warn("credential store disabled (set PINCER_MASTER_KEY to enable)")
-	}
-
-	soulPath := cfg.Soul.Path
-	if soulPath == "" {
-		soulPath = filepath.Join(config.DataDir(), "soul.toml")
-	}
-	soulDef, err := soul.Load(soulPath)
-	if err != nil {
-		return fmt.Errorf("loading soul: %w", err)
-	}
-	if err := soulDef.SeedMemory(ctx, mem, "default"); err != nil {
-		logger.Warn("soul memory seeding had errors", slog.String("err", err.Error()))
-	}
-	logger.Info("soul loaded",
-		slog.String("name", soulDef.Identity.Name),
-		slog.String("role", soulDef.Identity.Role),
-	)
-
-	provider, err := createProvider(cfg, logger)
-	if err != nil {
-		return fmt.Errorf("creating LLM provider: %w", err)
-	}
-	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
-
-	sb, err := createSandbox(cfg)
-	if err != nil {
-		return fmt.Errorf("creating sandbox: %w", err)
-	}
-	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
-
-	registry := tools.DefaultRegistry()
-	registry.Register(&tools.MemoryTool{Memory: mem})
-	registry.Register(&tools.SoulTool{Soul: soulDef})
-	if credStore != nil {
-		registry.Register(&tools.CredentialTool{Credentials: credStore})
-	}
-
-	skillDir := cfg.Skills.Dir
-	if skillDir == "" {
-		skillDir = filepath.Join(config.DataDir(), "skills")
-	}
-	engine := skills.NewEngine(skills.EngineConfig{
-		SkillDir:      skillDir,
-		AllowUnsigned: cfg.Skills.AllowUnsigned,
-	})
-	results, err := engine.LoadAll()
-	if err != nil {
-		logger.Warn("skill loading had errors", slog.String("err", err.Error()))
-	}
-	for _, r := range results {
-		logger.Info("skill loaded",
-			slog.String("skill", r.SkillName),
-			slog.Bool("safe", r.Safe),
-			slog.Int("findings", len(r.Findings)),
-		)
-		_ = auditLog.Log(ctx, audit.EventSkillLoad, "", "", "system",
-			fmt.Sprintf("skill=%s safe=%v findings=%d", r.SkillName, r.Safe, len(r.Findings)))
-	}
-
-	systemPrompt := soulDef.Render()
-	if cfg.Agent.SystemPrompt != "" {
-		systemPrompt += "\n" + cfg.Agent.SystemPrompt
-	}
-	for _, sk := range engine.List() {
-		if sk.Prompt != "" {
-			systemPrompt += "\n\n" + sk.Prompt
-		}
-	}
-
-	logger.Info("skill engine ready",
-		slog.Int("skills", len(engine.List())),
-		slog.Int("tools", len(registry.Definitions())),
-	)
-
-	approvalMode := agent.ApprovalMode(cfg.Agent.ToolApproval)
-	approver := agent.NewApprover(approvalMode, nil)
-
-	runtime := agent.NewRuntime(agent.RuntimeConfig{
-		Provider:      provider,
-		Store:         db,
-		Registry:      registry,
-		Sandbox:       sb,
-		Approver:      approver,
-		Model:         cfg.Agent.Model,
-		MaxTokens:     cfg.Agent.MaxContextTokens,
-		SystemPrompt:  systemPrompt,
-		Memory:        mem,
-		Audit:         auditLog,
-		DefaultPolicy: buildDefaultPolicy(cfg),
-	})
-
-	_ = auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
-		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
 
 	webhookSecret := os.Getenv("PINCER_WEBHOOK_SECRET")
 	webhooks := scheduler.NewWebhookHandler(webhookSecret)
@@ -217,11 +244,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting webchat adapter: %w", err)
 	}
 
-	var channelAdapters []channels.Adapter
-	channelAdapters = append(channelAdapters, initChannelAdapters(ctx, cfg, logger)...)
+	channelAdapters := initChannelAdapters(ctx, cfg, logger)
 
 	if len(channelAdapters) > 0 {
-		router := gateway.NewChannelRouter(runtime, channelAdapters, approver, logger, db, auditLog)
+		router := gateway.NewChannelRouter(runtime, channelAdapters, approver, logger, deps.db, deps.auditLog)
 		router.Start(ctx)
 
 		registry.Register(&tools.NotifyTool{
@@ -244,7 +270,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	logger.Info("pincer gateway ready",
 		slog.String("url", fmt.Sprintf("http://127.0.0.1:%d", cfg.Gateway.Port)),
-		slog.String("tool_approval", string(approvalMode)),
+		slog.String("tool_approval", string(agent.ApprovalMode(cfg.Agent.ToolApproval))),
 		slog.Int("channel_adapters", len(channelAdapters)),
 	)
 
@@ -290,71 +316,47 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+type adapterEntry struct {
+	name   string
+	envVar string
+	create func(cfg *config.Config) (channels.Adapter, error)
+}
+
 func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.Logger) []channels.Adapter {
+	entries := []adapterEntry{
+		{"telegram", "TELEGRAM_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return telegram.New(channelToken(c, "telegram"))
+		}},
+		{"discord", "DISCORD_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return discord.New(channelToken(c, "discord"))
+		}},
+		{"slack", "SLACK_BOT_TOKEN", func(c *config.Config) (channels.Adapter, error) {
+			return slackadapter.New(channelToken(c, "slack"), os.Getenv("SLACK_APP_TOKEN"))
+		}},
+		{"whatsapp", "WHATSAPP_DB_PATH", func(c *config.Config) (channels.Adapter, error) {
+			return whatsapp.New("")
+		}},
+		{"matrix", "MATRIX_HOMESERVER", func(c *config.Config) (channels.Adapter, error) {
+			return matrix.New(matrix.Config{})
+		}},
+	}
+
 	var adapters []channels.Adapter
-
-	if channelEnabled(cfg, "telegram") || os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
-		token := channelToken(cfg, "telegram")
-		tg, err := telegram.New(token)
-		if err != nil {
-			logger.Warn("telegram adapter skipped", slog.String("err", err.Error()))
-		} else if err := tg.Start(ctx); err != nil {
-			logger.Error("telegram adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("telegram adapter enabled")
-			adapters = append(adapters, tg)
+	for _, e := range entries {
+		if !channelEnabled(cfg, e.name) && os.Getenv(e.envVar) == "" {
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "discord") || os.Getenv("DISCORD_BOT_TOKEN") != "" {
-		token := channelToken(cfg, "discord")
-		dc, err := discord.New(token)
+		a, err := e.create(cfg)
 		if err != nil {
-			logger.Warn("discord adapter skipped", slog.String("err", err.Error()))
-		} else if err := dc.Start(ctx); err != nil {
-			logger.Error("discord adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("discord adapter enabled")
-			adapters = append(adapters, dc)
+			logger.Warn(e.name+" adapter skipped", slog.String("err", err.Error()))
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "slack") || os.Getenv("SLACK_BOT_TOKEN") != "" {
-		botToken := channelToken(cfg, "slack")
-		appToken := os.Getenv("SLACK_APP_TOKEN")
-		sl, err := slackadapter.New(botToken, appToken)
-		if err != nil {
-			logger.Warn("slack adapter skipped", slog.String("err", err.Error()))
-		} else if err := sl.Start(ctx); err != nil {
-			logger.Error("slack adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("slack adapter enabled")
-			adapters = append(adapters, sl)
+		if err := a.Start(ctx); err != nil {
+			logger.Error(e.name+" adapter failed to start", slog.String("err", err.Error()))
+			continue
 		}
-	}
-
-	if channelEnabled(cfg, "whatsapp") || os.Getenv("WHATSAPP_DB_PATH") != "" {
-		wa, err := whatsapp.New("")
-		if err != nil {
-			logger.Warn("whatsapp adapter skipped", slog.String("err", err.Error()))
-		} else if err := wa.Start(ctx); err != nil {
-			logger.Error("whatsapp adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("whatsapp adapter enabled")
-			adapters = append(adapters, wa)
-		}
-	}
-
-	if channelEnabled(cfg, "matrix") || os.Getenv("MATRIX_HOMESERVER") != "" {
-		mx, err := matrix.New(matrix.Config{})
-		if err != nil {
-			logger.Warn("matrix adapter skipped", slog.String("err", err.Error()))
-		} else if err := mx.Start(ctx); err != nil {
-			logger.Error("matrix adapter failed to start", slog.String("err", err.Error()))
-		} else {
-			logger.Info("matrix adapter enabled")
-			adapters = append(adapters, mx)
-		}
+		logger.Info(e.name + " adapter enabled")
+		adapters = append(adapters, a)
 	}
 
 	return adapters

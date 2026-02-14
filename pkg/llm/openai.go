@@ -2,7 +2,6 @@ package llm
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -127,39 +126,17 @@ func (o *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 		)
 	}
 
-	body, err := json.Marshal(apiReq)
+	resp, err := doLLMRequest(ctx, o.httpClient, "openai", o.baseURL, map[string]string{
+		"Authorization": "Bearer " + o.apiKey,
+	}, apiReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshaling request: %w", err)
+		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("openai: creating request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := o.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("openai: sending request: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai: API returned %d: %s", resp.StatusCode, string(errBody))
-	}
-
-	ch := make(chan ChatEvent, 64)
-
-	if req.Stream {
-		go o.readStream(ctx, resp.Body, ch)
-	} else {
-		go o.readFull(resp.Body, ch)
-	}
-
-	return ch, nil
+	return dispatchResponse(resp, req.Stream,
+		func(body io.ReadCloser, ch chan<- ChatEvent) { o.readStream(ctx, body, ch) },
+		func(body io.ReadCloser, ch chan<- ChatEvent) { o.readFull(body, ch) },
+	), nil
 }
 
 func convertToOpenAIMessages(m ChatMessage) []openaiMessage {

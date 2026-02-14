@@ -53,9 +53,9 @@ func (t *MemoryTool) Definition() llm.ToolDefinition {
 }
 
 func (t *MemoryTool) Execute(ctx context.Context, input json.RawMessage, _ sandbox.Sandbox, _ sandbox.Policy) (string, error) {
-	var params memoryInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("memory: invalid input: %w", err)
+	params, err := parseInput[memoryInput](input, "memory")
+	if err != nil {
+		return "", err
 	}
 
 	agentID := AgentIDFromContext(ctx)

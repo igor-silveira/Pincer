@@ -54,9 +54,9 @@ func (t *HTTPTool) Definition() llm.ToolDefinition {
 }
 
 func (t *HTTPTool) Execute(ctx context.Context, input json.RawMessage, sb sandbox.Sandbox, policy sandbox.Policy) (string, error) {
-	var params httpInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("http_request: invalid input: %w", err)
+	params, err := parseInput[httpInput](input, "http_request")
+	if err != nil {
+		return "", err
 	}
 
 	if params.URL == "" {
