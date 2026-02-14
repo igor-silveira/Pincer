@@ -336,7 +336,7 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 	}
 }
 
-func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logger, sessionID, content string, usage *llm.Usage) {
+func (r *Runtime) persistMessage(ctx context.Context, logger *slog.Logger, sessionID, role, contentType, content string, usage *llm.Usage) {
 	tokenCount := 0
 	if usage != nil {
 		tokenCount = usage.OutputTokens
@@ -345,16 +345,23 @@ func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logg
 	msg := &store.Message{
 		ID:          uuid.NewString(),
 		SessionID:   sessionID,
-		Role:        llm.RoleAssistant,
-		ContentType: store.ContentTypeText,
+		Role:        role,
+		ContentType: contentType,
 		Content:     content,
 		TokenCount:  tokenCount,
 		CreatedAt:   time.Now().UTC(),
 	}
 
 	if err := r.store.AppendMessage(ctx, msg); err != nil {
-		logger.Error("failed to persist assistant message", slog.String("err", err.Error()))
+		logger.Error("failed to persist message",
+			slog.String("content_type", contentType),
+			slog.String("err", err.Error()),
+		)
 	}
+}
+
+func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logger, sessionID, content string, usage *llm.Usage) {
+	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeText, content, usage)
 
 	if err := r.store.TouchSession(ctx, sessionID); err != nil {
 		logger.Error("failed to touch session", slog.String("err", err.Error()))
@@ -370,41 +377,13 @@ func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logge
 		ToolCalls: toolCalls,
 	})
 
-	tokenCount := 0
-	if usage != nil {
-		tokenCount = usage.OutputTokens
-	}
-
-	msg := &store.Message{
-		ID:          uuid.NewString(),
-		SessionID:   sessionID,
-		Role:        llm.RoleAssistant,
-		ContentType: store.ContentTypeToolCalls,
-		Content:     string(data),
-		TokenCount:  tokenCount,
-		CreatedAt:   time.Now().UTC(),
-	}
-
-	if err := r.store.AppendMessage(ctx, msg); err != nil {
-		logger.Error("failed to persist tool call message", slog.String("err", err.Error()))
-	}
+	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
 }
 
 func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Logger, sessionID string, results []llm.ToolResult) {
 	data, _ := json.Marshal(results)
 
-	msg := &store.Message{
-		ID:          uuid.NewString(),
-		SessionID:   sessionID,
-		Role:        llm.RoleUser,
-		ContentType: store.ContentTypeToolResults,
-		Content:     string(data),
-		CreatedAt:   time.Now().UTC(),
-	}
-
-	if err := r.store.AppendMessage(ctx, msg); err != nil {
-		logger.Error("failed to persist tool result message", slog.String("err", err.Error()))
-	}
+	r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
 }
 
 func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
