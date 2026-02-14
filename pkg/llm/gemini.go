@@ -202,7 +202,7 @@ type geminiUsage struct {
 
 func (g *GeminiProvider) readStream(ctx context.Context, body io.ReadCloser, ch chan<- ChatEvent) {
 	defer close(ch)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -257,7 +257,7 @@ func (g *GeminiProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 
 func (g *GeminiProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
 	defer close(ch)
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	var resp geminiStreamResponse
 	if err := json.NewDecoder(body).Decode(&resp); err != nil {

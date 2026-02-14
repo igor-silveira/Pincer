@@ -12,8 +12,8 @@ import (
 
 func TestNewAnthropicProvider_NoKey(t *testing.T) {
 	orig := os.Getenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("ANTHROPIC_API_KEY")
-	defer os.Setenv("ANTHROPIC_API_KEY", orig)
+	_ = os.Unsetenv("ANTHROPIC_API_KEY")
+	defer func() { _ = os.Setenv("ANTHROPIC_API_KEY", orig) }()
 
 	_, err := NewAnthropicProvider("", "")
 	if err == nil {

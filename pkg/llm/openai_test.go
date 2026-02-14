@@ -12,8 +12,8 @@ import (
 
 func TestNewOpenAIProvider_NoKey(t *testing.T) {
 	orig := os.Getenv("OPENAI_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
-	defer os.Setenv("OPENAI_API_KEY", orig)
+	_ = os.Unsetenv("OPENAI_API_KEY")
+	defer func() { _ = os.Setenv("OPENAI_API_KEY", orig) }()
 
 	_, err := NewOpenAIProvider("", "")
 	if err == nil {

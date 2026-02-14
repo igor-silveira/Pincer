@@ -23,7 +23,7 @@ func testDB(t *testing.T) *gorm.DB {
 	}
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
-		sqlDB.Close()
+		_ = sqlDB.Close()
 	})
 
 	if err := db.AutoMigrate(&Entry{}); err != nil {
