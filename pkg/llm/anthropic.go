@@ -13,24 +13,30 @@ import (
 )
 
 const (
-	anthropicAPIURL     = "https://api.anthropic.com/v1/messages"
-	anthropicAPIVersion = "2023-06-01"
+	anthropicDefaultBaseURL = "https://api.anthropic.com"
+	anthropicMessagesPath   = "/v1/messages"
+	anthropicAPIVersion     = "2023-06-01"
 )
 
 type AnthropicProvider struct {
 	apiKey     string
+	baseURL    string
 	httpClient *http.Client
 }
 
-func NewAnthropicProvider(apiKey string) (*AnthropicProvider, error) {
+func NewAnthropicProvider(apiKey, baseURL string) (*AnthropicProvider, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("anthropic: API key not set (provide it or set ANTHROPIC_API_KEY)")
 	}
+	if baseURL == "" {
+		baseURL = anthropicDefaultBaseURL
+	}
 	return &AnthropicProvider{
 		apiKey:     apiKey,
+		baseURL:    baseURL,
 		httpClient: &http.Client{},
 	}, nil
 }
@@ -117,7 +123,7 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 		return nil, fmt.Errorf("anthropic: marshaling request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPIURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+anthropicMessagesPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: creating request: %w", err)
 	}
