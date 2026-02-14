@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !goexperiment.jsonv2 || !go1.25
+
 // Package json implements semantic processing of JSON as specified in RFC 8259.
 // JSON is a simple data interchange format that can represent
 // primitive data types such as booleans, strings, and numbers,
@@ -112,17 +114,6 @@
 //     JSON object members not directly handled by the parent struct.
 //     Only one inlined fallback field may be specified in a struct,
 //     while many non-fallback fields may be specified. This option
-//     must not be specified with any other option (including the JSON name).
-//
-//   - unknown: The "unknown" option is a specialized variant
-//     of the inlined fallback to indicate that this Go struct field
-//     contains any number of unknown JSON object members. The field type must
-//     be a [jsontext.Value], map[~string]T, or an unnamed pointer to such types.
-//     If [DiscardUnknownMembers] is specified when marshaling,
-//     the contents of this field are ignored.
-//     If [RejectUnknownMembers] is specified when unmarshaling,
-//     any unknown object members are rejected regardless of whether
-//     an inlined fallback with the "unknown" option exists. This option
 //     must not be specified with any other option (including the JSON name).
 //
 //   - format: The "format" option specifies a format flag
