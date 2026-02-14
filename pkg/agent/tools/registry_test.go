@@ -78,6 +78,32 @@ func TestRegistry_RegisterOverwrite(t *testing.T) {
 	}
 }
 
+func TestRegistry_Unregister(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+	r.Register(&dummyTool{name: "b"})
+
+	r.Unregister("a")
+	if _, err := r.Get("a"); err == nil {
+		t.Error("expected error after unregister")
+	}
+	if _, err := r.Get("b"); err != nil {
+		t.Errorf("tool b should still exist: %v", err)
+	}
+	if len(r.Definitions()) != 1 {
+		t.Errorf("Definitions len = %d, want 1", len(r.Definitions()))
+	}
+}
+
+func TestRegistry_UnregisterNonExistent(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+	r.Unregister("nonexistent")
+	if len(r.Definitions()) != 1 {
+		t.Errorf("Definitions len = %d, want 1", len(r.Definitions()))
+	}
+}
+
 func TestDefaultRegistry_ContainsExpected(t *testing.T) {
 	r := DefaultRegistry()
 	expected := []string{"shell", "file_read", "file_write", "http_request", "browser"}
