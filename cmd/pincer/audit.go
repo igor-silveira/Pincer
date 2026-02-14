@@ -43,7 +43,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("opening store: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	auditLog, err := audit.New(db.DB())
 	if err != nil {
