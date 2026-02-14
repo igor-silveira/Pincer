@@ -33,13 +33,18 @@ func testDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func mustSet(t *testing.T, s *Store, ctx context.Context, agentID, key, value string) {
+	t.Helper()
+	if err := s.Set(ctx, agentID, key, value); err != nil {
+		t.Fatalf("Set(%q, %q): %v", key, value, err)
+	}
+}
+
 func TestSetAndGet(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	if err := s.Set(ctx, "agent-1", "name", "Pincer"); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
+	mustSet(t, s, ctx, "agent-1", "name", "Pincer")
 
 	e, err := s.Get(ctx, "agent-1", "name")
 	if err != nil {
@@ -54,9 +59,7 @@ func TestImmutableKey(t *testing.T) {
 	s := New(testDB(t), []string{"identity"})
 	ctx := context.Background()
 
-	if err := s.Set(ctx, "agent-1", "identity", "I am Pincer"); err != nil {
-		t.Fatalf("first Set: %v", err)
-	}
+	mustSet(t, s, ctx, "agent-1", "identity", "I am Pincer")
 
 	err := s.Set(ctx, "agent-1", "identity", "I am evil")
 	if err == nil {
@@ -73,9 +76,9 @@ func TestList(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "a", "1")
-	s.Set(ctx, "agent-1", "b", "2")
-	s.Set(ctx, "agent-2", "c", "3")
+	mustSet(t, s, ctx, "agent-1", "a", "1")
+	mustSet(t, s, ctx, "agent-1", "b", "2")
+	mustSet(t, s, ctx, "agent-2", "c", "3")
 
 	entries, err := s.List(ctx, "agent-1")
 	if err != nil {
@@ -90,8 +93,8 @@ func TestSearch(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "greeting", "Hello world")
-	s.Set(ctx, "agent-1", "farewell", "Goodbye")
+	mustSet(t, s, ctx, "agent-1", "greeting", "Hello world")
+	mustSet(t, s, ctx, "agent-1", "farewell", "Goodbye")
 
 	results, err := s.Search(ctx, "agent-1", "world")
 	if err != nil {
@@ -107,7 +110,7 @@ func TestDiff(t *testing.T) {
 	ctx := context.Background()
 
 	before := time.Now().UTC().Add(-time.Second)
-	s.Set(ctx, "agent-1", "new-key", "new-value")
+	mustSet(t, s, ctx, "agent-1", "new-key", "new-value")
 
 	entries, err := s.Diff(ctx, "agent-1", before)
 	if err != nil {
@@ -122,8 +125,8 @@ func TestBuildContext(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "identity", "I am Pincer")
-	s.Set(ctx, "agent-1", "role", "Assistant")
+	mustSet(t, s, ctx, "agent-1", "identity", "I am Pincer")
+	mustSet(t, s, ctx, "agent-1", "role", "Assistant")
 
 	text, hashes, err := s.BuildContext(ctx, "agent-1", nil)
 	if err != nil {
@@ -149,7 +152,7 @@ func TestDelete(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "temp", "value")
+	mustSet(t, s, ctx, "agent-1", "temp", "value")
 	if err := s.Delete(ctx, "agent-1", "temp"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -178,8 +181,8 @@ func TestSetUpsertUpdatesValue(t *testing.T) {
 	s := New(db, nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "key", "value-1")
-	s.Set(ctx, "agent-1", "key", "value-2")
+	mustSet(t, s, ctx, "agent-1", "key", "value-1")
+	mustSet(t, s, ctx, "agent-1", "key", "value-2")
 
 	e, err := s.Get(ctx, "agent-1", "key")
 	if err != nil {
@@ -226,7 +229,7 @@ func TestSearchNoMatch(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "greeting", "Hello world")
+	mustSet(t, s, ctx, "agent-1", "greeting", "Hello world")
 
 	results, err := s.Search(ctx, "agent-1", "zzzznotmatchable")
 	if err != nil {
@@ -241,7 +244,7 @@ func TestDiffNoChanges(t *testing.T) {
 	s := New(testDB(t), nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "key", "value")
+	mustSet(t, s, ctx, "agent-1", "key", "value")
 
 	future := time.Now().UTC().Add(time.Hour)
 	entries, err := s.Diff(ctx, "agent-1", future)
@@ -258,11 +261,11 @@ func TestSetPreservesHash(t *testing.T) {
 	s := New(db, nil)
 	ctx := context.Background()
 
-	s.Set(ctx, "agent-1", "key", "same-value")
+	mustSet(t, s, ctx, "agent-1", "key", "same-value")
 	e1, _ := s.Get(ctx, "agent-1", "key")
 	hash1 := e1.Hash
 
-	s.Set(ctx, "agent-1", "key", "same-value")
+	mustSet(t, s, ctx, "agent-1", "key", "same-value")
 	e2, _ := s.Get(ctx, "agent-1", "key")
 	hash2 := e2.Hash
 
@@ -270,7 +273,7 @@ func TestSetPreservesHash(t *testing.T) {
 		t.Errorf("hash changed for same value: %q vs %q", hash1, hash2)
 	}
 
-	s.Set(ctx, "agent-1", "key", "different-value")
+	mustSet(t, s, ctx, "agent-1", "key", "different-value")
 	e3, _ := s.Get(ctx, "agent-1", "key")
 	if e3.Hash == hash1 {
 		t.Error("hash should differ for different value")

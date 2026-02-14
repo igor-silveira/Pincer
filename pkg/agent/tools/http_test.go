@@ -24,7 +24,7 @@ func TestHTTPTool_NetworkDenyBlocks(t *testing.T) {
 func TestHTTPTool_NetworkAllowPasses(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srv.Close()
 

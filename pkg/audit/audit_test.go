@@ -59,7 +59,9 @@ func TestLogStructuredDetail(t *testing.T) {
 	ctx := context.Background()
 
 	detail := map[string]string{"tool": "shell", "command": "ls -la"}
-	l.Log(ctx, EventToolExec, "", "", "agent", detail)
+	if err := l.Log(ctx, EventToolExec, "", "", "agent", detail); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	entries, _ := l.Query(ctx, Filter{Limit: 1})
 	if len(entries) == 0 {
@@ -74,9 +76,15 @@ func TestQueryFilters(t *testing.T) {
 	l := testLogger(t)
 	ctx := context.Background()
 
-	l.Log(ctx, EventToolExec, "s1", "a1", "user", "exec 1")
-	l.Log(ctx, EventMemorySet, "s1", "a1", "agent", "set key")
-	l.Log(ctx, EventToolExec, "s2", "a2", "user", "exec 2")
+	if err := l.Log(ctx, EventToolExec, "s1", "a1", "user", "exec 1"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if err := l.Log(ctx, EventMemorySet, "s1", "a1", "agent", "set key"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if err := l.Log(ctx, EventToolExec, "s2", "a2", "user", "exec 2"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	entries, _ := l.Query(ctx, Filter{EventType: EventToolExec})
 	if len(entries) != 2 {
@@ -104,7 +112,9 @@ func TestQueryTimeRange(t *testing.T) {
 	ctx := context.Background()
 
 	before := time.Now().UTC().Add(-time.Second)
-	l.Log(ctx, EventToolExec, "", "", "", "event")
+	if err := l.Log(ctx, EventToolExec, "", "", "", "event"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	entries, _ := l.Query(ctx, Filter{Since: before})
 	if len(entries) != 1 {
@@ -121,11 +131,17 @@ func TestQueryOrdering(t *testing.T) {
 	l := testLogger(t)
 	ctx := context.Background()
 
-	l.Log(ctx, EventToolExec, "s1", "a1", "user", "first")
+	if err := l.Log(ctx, EventToolExec, "s1", "a1", "user", "first"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 	time.Sleep(10 * time.Millisecond)
-	l.Log(ctx, EventToolExec, "s1", "a1", "user", "second")
+	if err := l.Log(ctx, EventToolExec, "s1", "a1", "user", "second"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 	time.Sleep(10 * time.Millisecond)
-	l.Log(ctx, EventToolExec, "s1", "a1", "user", "third")
+	if err := l.Log(ctx, EventToolExec, "s1", "a1", "user", "third"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	entries, err := l.Query(ctx, Filter{})
 	if err != nil {
@@ -146,9 +162,15 @@ func TestQueryCombinedFilters(t *testing.T) {
 	l := testLogger(t)
 	ctx := context.Background()
 
-	l.Log(ctx, EventToolExec, "s1", "a1", "user", "match")
-	l.Log(ctx, EventMemorySet, "s1", "a1", "agent", "wrong type")
-	l.Log(ctx, EventToolExec, "s2", "a2", "user", "wrong session")
+	if err := l.Log(ctx, EventToolExec, "s1", "a1", "user", "match"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if err := l.Log(ctx, EventMemorySet, "s1", "a1", "agent", "wrong type"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	if err := l.Log(ctx, EventToolExec, "s2", "a2", "user", "wrong session"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	entries, err := l.Query(ctx, Filter{EventType: EventToolExec, SessionID: "s1"})
 	if err != nil {
@@ -188,7 +210,9 @@ func TestQueryNoLimit(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
-		l.Log(ctx, EventToolExec, "", "", "", fmt.Sprintf("event-%d", i))
+		if err := l.Log(ctx, EventToolExec, "", "", "", fmt.Sprintf("event-%d", i)); err != nil {
+			t.Fatalf("Log: %v", err)
+		}
 	}
 
 	entries, err := l.Query(ctx, Filter{Limit: 0})

@@ -103,11 +103,7 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 	}
 
 	for _, t := range req.Tools {
-		apiReq.Tools = append(apiReq.Tools, anthropicTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
-		})
+		apiReq.Tools = append(apiReq.Tools, anthropicTool(t))
 	}
 
 	for _, m := range req.Messages {

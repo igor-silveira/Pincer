@@ -141,7 +141,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 		if token == "" || token == header || token != g.authToken {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -149,7 +149,7 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 }
 
 func resolveAddr(bind string, port int) string {
-	host := "127.0.0.1"
+	var host string
 	switch bind {
 	case "lan", "all":
 		host = "0.0.0.0"

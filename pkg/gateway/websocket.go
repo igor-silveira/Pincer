@@ -38,7 +38,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		g.logger.Error("websocket accept failed", slog.String("err", err.Error()))
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	sessionID := uuid.NewString()
 	client := g.chat.RegisterClient(sessionID)
@@ -49,7 +49,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	g.logger.Info("webchat client connected", slog.String("session_id", sessionID))
 
-	wsjson.Write(ctx, conn, wsOutgoing{
+	_ = wsjson.Write(ctx, conn, wsOutgoing{
 		Type:      "session",
 		SessionID: sessionID,
 	})
@@ -61,7 +61,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "message",
 					SessionID: sessionID,
 					Content:   msg,
@@ -86,7 +86,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		var incoming wsIncoming
 		if err := json.Unmarshal(data, &incoming); err != nil {
-			wsjson.Write(ctx, conn, wsOutgoing{
+			_ = wsjson.Write(ctx, conn, wsOutgoing{
 				Type:  "error",
 				Error: "invalid message format",
 			})
@@ -110,7 +110,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		events, err := g.runtime.RunTurn(ctx, sessionID, incoming.Content)
 		if err != nil {
 			g.logger.Error("agent turn failed", slog.String("err", err.Error()))
-			wsjson.Write(ctx, conn, wsOutgoing{
+			_ = wsjson.Write(ctx, conn, wsOutgoing{
 				Type:  "error",
 				Error: "failed to process message",
 			})
@@ -120,25 +120,25 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		for ev := range events {
 			switch ev.Type {
 			case agent.TurnToken:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "token",
 					SessionID: sessionID,
 					Content:   ev.Token,
 				})
 			case agent.TurnToolCall:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "tool_call",
 					SessionID: sessionID,
 					ToolName:  ev.ToolCall.Name,
 					ToolInput: string(ev.ToolCall.Input),
 				})
 			case agent.TurnToolResult:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "tool_result",
 					SessionID: sessionID,
 				})
 			case agent.TurnApprovalNeeded:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "approval_request",
 					SessionID: sessionID,
 					RequestID: ev.ApprovalRequest.ID,
@@ -146,12 +146,12 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					ToolInput: ev.ApprovalRequest.Input,
 				})
 			case agent.TurnDone:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "done",
 					SessionID: sessionID,
 				})
 			case agent.TurnError:
-				wsjson.Write(ctx, conn, wsOutgoing{
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:  "error",
 					Error: ev.Error.Error(),
 				})

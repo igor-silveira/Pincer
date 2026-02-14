@@ -217,7 +217,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("initializing tracer: %w", err)
 	}
-	defer shutdownTracer(context.Background())
+	defer func() { _ = shutdownTracer(context.Background()) }()
 	if cfg.Tracing.Enabled {
 		logger.Info("opentelemetry tracing enabled", slog.String("endpoint", cfg.Tracing.Endpoint))
 	}

@@ -152,8 +152,12 @@ func TestEngineInstallSigned(t *testing.T) {
 func TestEngineList(t *testing.T) {
 	engine := NewEngine(EngineConfig{AllowUnsigned: true})
 
-	engine.Install(&Skill{Name: "a", Prompt: "safe"})
-	engine.Install(&Skill{Name: "b", Prompt: "safe"})
+	if _, err := engine.Install(&Skill{Name: "a", Prompt: "safe"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := engine.Install(&Skill{Name: "b", Prompt: "safe"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
 
 	if len(engine.List()) != 2 {
 		t.Errorf("len = %d, want 2", len(engine.List()))
@@ -162,7 +166,9 @@ func TestEngineList(t *testing.T) {
 
 func TestEngineUninstall(t *testing.T) {
 	engine := NewEngine(EngineConfig{AllowUnsigned: true})
-	engine.Install(&Skill{Name: "removable", Prompt: "safe"})
+	if _, err := engine.Install(&Skill{Name: "removable", Prompt: "safe"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
 
 	if !engine.Uninstall("removable") {
 		t.Fatal("Uninstall returned false")
