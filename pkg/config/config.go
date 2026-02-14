@@ -21,6 +21,8 @@ type Config struct {
 	Skills      SkillsConfig             `toml:"skills"`
 	Credentials CredentialsConfig        `toml:"credentials"`
 	Soul        SoulConfig               `toml:"soul"`
+	MCP         MCPConfig                `toml:"mcp"`
+	A2A         A2AConfig                `toml:"a2a"`
 }
 
 type GatewayConfig struct {
@@ -85,6 +87,24 @@ type CredentialsConfig struct {
 
 type SoulConfig struct {
 	Path string `toml:"path"`
+}
+
+type MCPConfig struct {
+	Servers []MCPServerConfig `toml:"servers"`
+}
+
+type MCPServerConfig struct {
+	Name    string            `toml:"name"`
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args"`
+	Env     map[string]string `toml:"env"`
+	Enabled *bool             `toml:"enabled"`
+}
+
+type A2AConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	AuthToken   string `toml:"auth_token"`
+	ExternalURL string `toml:"external_url"`
 }
 
 func Default() *Config {
