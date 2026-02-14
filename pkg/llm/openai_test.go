@@ -32,7 +32,7 @@ func TestOpenAIChat_FullResponse(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(respData)
+		_, _ = w.Write(respData)
 	}))
 	defer srv.Close()
 
@@ -100,7 +100,7 @@ func TestOpenAIChat_ToolCalls(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(respData)
+		_, _ = w.Write(respData)
 	}))
 	defer srv.Close()
 
