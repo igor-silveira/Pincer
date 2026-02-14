@@ -68,7 +68,9 @@ func TestFindSession(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
 	found, err := s.FindSession(ctx, "agent-1", "telegram", "user-42")
 	if err != nil {
@@ -87,17 +89,21 @@ func TestAppendAndRecentMessages(t *testing.T) {
 		ID: "sess-3", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
 	for i := 0; i < 5; i++ {
-		s.AppendMessage(ctx, &Message{
+		if err := s.AppendMessage(ctx, &Message{
 			ID:         fmt.Sprintf("msg-%d", i),
 			SessionID:  "sess-3",
 			Role:       "user",
 			Content:    fmt.Sprintf("message %d", i),
 			TokenCount: 10,
 			CreatedAt:  time.Now().UTC().Add(time.Duration(i) * time.Second),
-		})
+		}); err != nil {
+			t.Fatalf("AppendMessage: %v", err)
+		}
 	}
 
 	msgs, err := s.RecentMessages(ctx, "sess-3", 3)
@@ -121,16 +127,22 @@ func TestMessageCount(t *testing.T) {
 		ID: "sess-4", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
-	s.AppendMessage(ctx, &Message{
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "m1", SessionID: "sess-4", Role: "user", Content: "hi",
 		CreatedAt: time.Now().UTC(),
-	})
-	s.AppendMessage(ctx, &Message{
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "m2", SessionID: "sess-4", Role: "assistant", Content: "hello",
 		CreatedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	count, err := s.MessageCount(ctx, "sess-4")
 	if err != nil {
@@ -149,16 +161,22 @@ func TestDeleteMessages(t *testing.T) {
 		ID: "sess-5", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
-	s.AppendMessage(ctx, &Message{
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "d1", SessionID: "sess-5", Role: "user", Content: "delete me",
 		CreatedAt: time.Now().UTC(),
-	})
-	s.AppendMessage(ctx, &Message{
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "d2", SessionID: "sess-5", Role: "user", Content: "keep me",
 		CreatedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	if err := s.DeleteMessages(ctx, []string{"d1"}); err != nil {
 		t.Fatalf("DeleteMessages: %v", err)
@@ -178,16 +196,22 @@ func TestSessionTokenUsage(t *testing.T) {
 		ID: "sess-6", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
-	s.AppendMessage(ctx, &Message{
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "t1", SessionID: "sess-6", Role: "user", Content: "test",
 		TokenCount: 50, CreatedAt: time.Now().UTC(),
-	})
-	s.AppendMessage(ctx, &Message{
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "t2", SessionID: "sess-6", Role: "assistant", Content: "response",
 		TokenCount: 150, CreatedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	total, err := s.SessionTokenUsage(ctx, "sess-6")
 	if err != nil {
@@ -307,7 +331,9 @@ func TestRecentMessagesEmpty(t *testing.T) {
 		ID: "empty-msgs", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
 	msgs, err := s.RecentMessages(ctx, "empty-msgs", 10)
 	if err != nil {
@@ -339,12 +365,16 @@ func TestAppendMessageDefaultContentType(t *testing.T) {
 		ID: "ct-sess", AgentID: "a", Channel: "c", PeerID: "p",
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
-	s.CreateSession(ctx, sess)
+	if err := s.CreateSession(ctx, sess); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
 
-	s.AppendMessage(ctx, &Message{
+	if err := s.AppendMessage(ctx, &Message{
 		ID: "ct-msg", SessionID: "ct-sess", Role: "user", Content: "hello",
 		CreatedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
 
 	msgs, _ := s.RecentMessages(ctx, "ct-sess", 1)
 	if len(msgs) != 1 {

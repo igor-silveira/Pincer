@@ -144,9 +144,11 @@ func runRestore(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		targetPath := filepath.Join(dataDir, relPath)
+		targetPath := filepath.Join(dataDir, filepath.Clean(relPath))
 
-		if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(dataDir)) {
+		cleanTarget := filepath.Clean(targetPath)
+		cleanBase := filepath.Clean(dataDir) + string(filepath.Separator)
+		if !strings.HasPrefix(cleanTarget, cleanBase) && cleanTarget != filepath.Clean(dataDir) {
 			return fmt.Errorf("invalid path in backup: %s", header.Name)
 		}
 
@@ -159,11 +161,13 @@ func runRestore(cmd *cobra.Command, args []string) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
 				return err
 			}
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			mode := os.FileMode(header.Mode & 0o777)
+			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("creating file %s: %w", targetPath, err)
 			}
-			if _, err := io.Copy(outFile, tr); err != nil {
+			const maxFileSize = 512 * 1024 * 1024
+			if _, err := io.Copy(outFile, io.LimitReader(tr, maxFileSize)); err != nil {
 				outFile.Close()
 				return fmt.Errorf("writing file %s: %w", targetPath, err)
 			}

@@ -53,11 +53,10 @@ func TestParseTextApproval(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	name     string
-	inbound  chan channels.InboundMessage
-	sent     []channels.OutboundMessage
-	mu       sync.Mutex
-	approval *channels.ApprovalRequest
+	name    string
+	inbound chan channels.InboundMessage
+	sent    []channels.OutboundMessage
+	mu      sync.Mutex
 }
 
 func newFakeAdapter(name string) *fakeAdapter {

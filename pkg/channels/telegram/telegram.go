@@ -130,7 +130,7 @@ func (a *Adapter) handleCallbackQuery(ctx context.Context, b *bot.Bot, update *m
 
 	approved := action == "approve"
 
-	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
 		CallbackQueryID: update.CallbackQuery.ID,
 		Text:            fmt.Sprintf("Tool %sd", action),
 	})
@@ -144,12 +144,12 @@ func (a *Adapter) handleCallbackQuery(ctx context.Context, b *bot.Bot, update *m
 			status = "❌ Denied"
 		}
 
-		b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+		_, _ = b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
 			ChatID:      chatID,
 			MessageID:   messageID,
 			ReplyMarkup: nil,
 		})
-		b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: messageID,
 			Text:      update.CallbackQuery.Message.Message.Text + "\n\n" + status,
