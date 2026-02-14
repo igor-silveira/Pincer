@@ -70,8 +70,12 @@ func TestUpsert(t *testing.T) {
 	s, _ := New(testDB(t), "test-key")
 	ctx := context.Background()
 
-	s.Set(ctx, "token", "old-value")
-	s.Set(ctx, "token", "new-value")
+	if err := s.Set(ctx, "token", "old-value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Set(ctx, "token", "new-value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
 
 	val, _ := s.Get(ctx, "token")
 	if val != "new-value" {
@@ -83,7 +87,9 @@ func TestDelete(t *testing.T) {
 	s, _ := New(testDB(t), "test-key")
 	ctx := context.Background()
 
-	s.Set(ctx, "temp", "value")
+	if err := s.Set(ctx, "temp", "value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
 	if err := s.Delete(ctx, "temp"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -106,8 +112,12 @@ func TestList(t *testing.T) {
 	s, _ := New(testDB(t), "test-key")
 	ctx := context.Background()
 
-	s.Set(ctx, "b-key", "val")
-	s.Set(ctx, "a-key", "val")
+	if err := s.Set(ctx, "b-key", "val"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Set(ctx, "a-key", "val"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
 
 	names, err := s.List(ctx)
 	if err != nil {
@@ -127,7 +137,9 @@ func TestWrongKeyCannotDecrypt(t *testing.T) {
 	ctx := context.Background()
 
 	s1, _ := New(db, "key-one")
-	s1.Set(ctx, "secret", "plaintext")
+	if err := s1.Set(ctx, "secret", "plaintext"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
 
 	s2, _ := New(db, "key-two")
 	_, err := s2.Get(ctx, "secret")
@@ -141,8 +153,12 @@ func TestUpsertUpdatesEncryptedValue(t *testing.T) {
 	s, _ := New(db, "test-key")
 	ctx := context.Background()
 
-	s.Set(ctx, "token", "old-value")
-	s.Set(ctx, "token", "new-value")
+	if err := s.Set(ctx, "token", "old-value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Set(ctx, "token", "new-value"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
 
 	val, err := s.Get(ctx, "token")
 	if err != nil {
@@ -176,9 +192,15 @@ func TestListAfterDelete(t *testing.T) {
 	s, _ := New(testDB(t), "test-key")
 	ctx := context.Background()
 
-	s.Set(ctx, "keep", "val1")
-	s.Set(ctx, "remove", "val2")
-	s.Delete(ctx, "remove")
+	if err := s.Set(ctx, "keep", "val1"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Set(ctx, "remove", "val2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := s.Delete(ctx, "remove"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
 
 	names, err := s.List(ctx)
 	if err != nil {

@@ -56,7 +56,11 @@ func (a *Adapter) Start(ctx context.Context) error {
 	a.socket = socketmode.New(a.client)
 
 	go a.listenEvents(ctx)
-	go a.socket.Run()
+	go func() {
+		if err := a.socket.Run(); err != nil {
+			slog.Error("slack socket error", slog.String("err", err.Error()))
+		}
+	}()
 
 	logger.Info("slack adapter started")
 	return nil

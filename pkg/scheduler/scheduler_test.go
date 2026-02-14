@@ -62,14 +62,16 @@ func TestSchedulerRuns(t *testing.T) {
 	s := New()
 	var count atomic.Int32
 
-	s.Add(Job{
+	if err := s.Add(Job{
 		Name:     "counter",
 		Schedule: "100ms",
 		Func: func(ctx context.Context) error {
 			count.Add(1)
 			return nil
 		},
-	})
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
 
 	s.mu.Lock()
 	for i := range s.jobs {

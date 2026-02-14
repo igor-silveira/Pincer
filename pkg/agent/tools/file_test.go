@@ -13,7 +13,9 @@ import (
 func TestFileReadTool_Allowed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("hello"), 0644)
+	if err := os.WriteFile(path, []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	tool := &FileReadTool{}
 	input, _ := json.Marshal(fileReadInput{Path: path})
@@ -31,7 +33,9 @@ func TestFileReadTool_Allowed(t *testing.T) {
 func TestFileReadTool_Denied(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("secret"), 0644)
+	if err := os.WriteFile(path, []byte("secret"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	tool := &FileReadTool{}
 	input, _ := json.Marshal(fileReadInput{Path: path})
@@ -46,7 +50,9 @@ func TestFileReadTool_Denied(t *testing.T) {
 func TestFileReadTool_EmptyPolicyAllowsAll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("data"), 0644)
+	if err := os.WriteFile(path, []byte("data"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	tool := &FileReadTool{}
 	input, _ := json.Marshal(fileReadInput{Path: path})

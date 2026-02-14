@@ -49,9 +49,15 @@ func TestCheckPathAllowed_SymlinkEscape(t *testing.T) {
 	outside := filepath.Join(dir, "outside")
 	link := filepath.Join(allowed, "escape")
 
-	os.MkdirAll(allowed, 0755)
-	os.MkdirAll(outside, 0755)
-	os.Symlink(outside, link)
+	if err := os.MkdirAll(allowed, 0750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
 
 	if err := CheckPathAllowed(link, []string{allowed}); err == nil {
 		t.Error("symlink escaping allowed dir should be rejected")

@@ -126,7 +126,7 @@ func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage, sb s
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			return "", fmt.Errorf("file_write: creating directory: %w", err)
 		}
 	}
@@ -136,7 +136,7 @@ func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage, sb s
 		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
 	}
 
-	f, err := os.OpenFile(path, flag, 0644)
+	f, err := os.OpenFile(path, flag, 0600)
 	if err != nil {
 		return "", fmt.Errorf("file_write: %w", err)
 	}

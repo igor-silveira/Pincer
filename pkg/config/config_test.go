@@ -32,7 +32,7 @@ func TestLoadNonExistent(t *testing.T) {
 
 func TestLoadValid(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "pincer.toml")
+	path := filepath.Join(dir, "pincer.toml.example")
 
 	content := `
 [gateway]
@@ -77,7 +77,9 @@ immutable_keys = ["identity"]
 func TestLoadInvalid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.toml")
-	os.WriteFile(path, []byte("not [valid toml"), 0644)
+	if err := os.WriteFile(path, []byte("not [valid toml"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	_, err := Load(path)
 	if err == nil {
