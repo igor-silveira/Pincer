@@ -92,21 +92,8 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		return
 	}
 
-	var fullResponse string
-	for ev := range events {
-		switch ev.Type {
-		case agent.TurnApprovalNeeded:
-			cr.sendApprovalRequest(ctx, adapter, msg.SessionID, ev.ApprovalRequest)
-		case agent.TurnDone:
-			fullResponse = ev.Message
-		case agent.TurnError:
-			logger.Error("agent error during turn",
-				slog.String("channel", msg.ChannelName),
-				slog.String("err", ev.Error.Error()),
-			)
-			fullResponse = "Sorry, I encountered an error processing your message."
-		}
-	}
+	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, msg.SessionID, events,
+		"Sorry, I encountered an error processing your message.")
 
 	if fullResponse == "" {
 		return
@@ -117,10 +104,29 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		Content:   fullResponse,
 	}); err != nil {
 		logger.Error("failed to send response",
-			slog.String("channel", msg.ChannelName),
+			slog.String("session_id", msg.SessionID),
 			slog.String("err", err.Error()),
 		)
 	}
+}
+
+func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Logger, adapter channels.Adapter, sessionID string, events <-chan agent.TurnEvent, errorMessage string) string {
+	var fullResponse string
+	for ev := range events {
+		switch ev.Type {
+		case agent.TurnApprovalNeeded:
+			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
+		case agent.TurnDone:
+			fullResponse = ev.Message
+		case agent.TurnError:
+			logger.Error("agent error during turn",
+				slog.String("session_id", sessionID),
+				slog.String("err", ev.Error.Error()),
+			)
+			fullResponse = errorMessage
+		}
+	}
+	return fullResponse
 }
 
 func (cr *ChannelRouter) sendApprovalRequest(ctx context.Context, adapter channels.Adapter, sessionID string, req *agent.ApprovalRequest) {
@@ -268,21 +274,8 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 		return
 	}
 
-	var fullResponse string
-	for ev := range events {
-		switch ev.Type {
-		case agent.TurnApprovalNeeded:
-			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
-		case agent.TurnDone:
-			fullResponse = ev.Message
-		case agent.TurnError:
-			logger.Error("notify: agent error during turn",
-				slog.String("session_id", sessionID),
-				slog.String("err", ev.Error.Error()),
-			)
-			fullResponse = "Sorry, I encountered an error processing a scheduled task."
-		}
-	}
+	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, sessionID, events,
+		"Sorry, I encountered an error processing a scheduled task.")
 
 	if fullResponse == "" {
 		return
@@ -292,7 +285,7 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 		SessionID: sessionID,
 		Content:   fullResponse,
 	}); err != nil {
-		logger.Error("notify: failed to send response",
+		logger.Error("failed to send response",
 			slog.String("session_id", sessionID),
 			slog.String("err", err.Error()),
 		)
