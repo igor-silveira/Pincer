@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/igorsilveira/pincer/pkg/channels"
@@ -17,8 +16,7 @@ type Adapter struct {
 	token    string
 	session  *discordgo.Session
 	inbound  chan channels.InboundMessage
-	sessions map[string]string
-	mu       sync.RWMutex
+	sessions *channels.SessionMap[string]
 	done     chan struct{}
 }
 
@@ -32,7 +30,7 @@ func New(token string) (*Adapter, error) {
 	return &Adapter{
 		token:    token,
 		inbound:  make(chan channels.InboundMessage, 256),
-		sessions: make(map[string]string),
+		sessions: channels.NewSessionMap[string]("dc", func(k string) string { return k }),
 		done:     make(chan struct{}),
 	}, nil
 }
@@ -82,17 +80,8 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("discord: not connected")
 	}
 
-	a.mu.RLock()
-	var channelID string
-	for cid, sid := range a.sessions {
-		if sid == msg.SessionID {
-			channelID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if channelID == "" {
+	channelID, ok := a.sessions.Reverse(msg.SessionID)
+	if !ok {
 		return fmt.Errorf("discord: no channel for session %s", msg.SessionID)
 	}
 
@@ -130,17 +119,8 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 		return fmt.Errorf("discord: not connected")
 	}
 
-	a.mu.RLock()
-	var channelID string
-	for cid, sid := range a.sessions {
-		if sid == req.SessionID {
-			channelID = cid
-			break
-		}
-	}
-	a.mu.RUnlock()
-
-	if channelID == "" {
+	channelID, ok := a.sessions.Reverse(req.SessionID)
+	if !ok {
 		return fmt.Errorf("discord: no channel for session %s", req.SessionID)
 	}
 
@@ -196,7 +176,7 @@ func (a *Adapter) handleInteraction(s *discordgo.Session, i *discordgo.Interacti
 		},
 	})
 
-	sessionID := a.sessionForChannel(i.ChannelID)
+	sessionID, _ := a.sessions.Lookup(i.ChannelID)
 	peerID := ""
 	if i.Member != nil && i.Member.User != nil {
 		peerID = i.Member.User.ID
@@ -225,7 +205,7 @@ func (a *Adapter) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate
 		return
 	}
 
-	sessionID := a.getOrCreateSession(m.ChannelID)
+	sessionID := a.sessions.GetOrCreate(m.ChannelID)
 
 	slog.Debug("discord message received",
 		slog.String("channel_id", m.ChannelID),
@@ -240,29 +220,3 @@ func (a *Adapter) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate
 	}
 }
 
-func (a *Adapter) getOrCreateSession(channelID string) string {
-	a.mu.RLock()
-	sid, ok := a.sessions[channelID]
-	a.mu.RUnlock()
-
-	if ok {
-		return sid
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if sid, ok := a.sessions[channelID]; ok {
-		return sid
-	}
-
-	sid = fmt.Sprintf("dc-%s", channelID)
-	a.sessions[channelID] = sid
-	return sid
-}
-
-func (a *Adapter) sessionForChannel(channelID string) string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.sessions[channelID]
-}
