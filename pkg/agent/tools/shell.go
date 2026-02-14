@@ -39,9 +39,9 @@ func (t *ShellTool) Definition() llm.ToolDefinition {
 }
 
 func (t *ShellTool) Execute(ctx context.Context, input json.RawMessage, sb sandbox.Sandbox, policy sandbox.Policy) (string, error) {
-	var params shellInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("shell: invalid input: %w", err)
+	params, err := parseInput[shellInput](input, "shell")
+	if err != nil {
+		return "", err
 	}
 
 	if params.Command == "" {

@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
@@ -36,9 +35,9 @@ func (t *SoulTool) Definition() llm.ToolDefinition {
 }
 
 func (t *SoulTool) Execute(ctx context.Context, input json.RawMessage, _ sandbox.Sandbox, _ sandbox.Policy) (string, error) {
-	var params soulInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("soul: invalid input: %w", err)
+	params, err := parseInput[soulInput](input, "soul")
+	if err != nil {
+		return "", err
 	}
 
 	if params.Section == "" || params.Section == "all" {
