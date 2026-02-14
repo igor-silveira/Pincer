@@ -24,6 +24,12 @@ const (
 	EventNotifySchedule = "notify_schedule"
 	EventNotifyDeliver  = "notify_deliver"
 	EventNotifySend     = "notify_send"
+	EventMCPConnect     = "mcp_connect"
+	EventMCPDisconnect  = "mcp_disconnect"
+	EventA2ATaskNew     = "a2a_task_new"
+	EventA2ATaskDone    = "a2a_task_done"
+	EventA2ATaskFail    = "a2a_task_fail"
+	EventA2ATaskCancel  = "a2a_task_cancel"
 )
 
 type Entry struct {
