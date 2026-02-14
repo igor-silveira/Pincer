@@ -352,11 +352,11 @@ func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logg
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
+	if err := r.store.AppendMessage(ctx, msg); err != nil {
 		logger.Error("failed to persist assistant message", slog.String("err", err.Error()))
 	}
 
-	if err := r.store.TouchSession(context.Background(), sessionID); err != nil {
+	if err := r.store.TouchSession(ctx, sessionID); err != nil {
 		logger.Error("failed to touch session", slog.String("err", err.Error()))
 	}
 }
@@ -385,7 +385,7 @@ func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logge
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
+	if err := r.store.AppendMessage(ctx, msg); err != nil {
 		logger.Error("failed to persist tool call message", slog.String("err", err.Error()))
 	}
 }
@@ -402,7 +402,7 @@ func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Log
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := r.store.AppendMessage(context.Background(), msg); err != nil {
+	if err := r.store.AppendMessage(ctx, msg); err != nil {
 		logger.Error("failed to persist tool result message", slog.String("err", err.Error()))
 	}
 }
