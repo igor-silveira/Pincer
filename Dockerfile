@@ -1,14 +1,10 @@
 FROM golang:1.24-alpine AS build
 
-RUN apk add --no-cache git
-
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
 
 ARG VERSION=0.1.0
-RUN go build -ldflags="-s -w -X github.com/igorsilveira/pincer/cmd/pincer.version=${VERSION}" -trimpath -o /pincer .
+RUN go build -mod=vendor -ldflags="-s -w -X github.com/igorsilveira/pincer/cmd/pincer.version=${VERSION}" -trimpath -o /pincer .
 
 FROM alpine:3.21
 
