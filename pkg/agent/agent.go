@@ -410,40 +410,9 @@ func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Log
 func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
 	msgs := make([]llm.ChatMessage, 0, len(history))
 	for _, m := range history {
-		msgs = append(msgs, r.messageToChat(m))
+		msgs = append(msgs, messageToLLM(m))
 	}
 	return sanitizeToolPairs(msgs)
-}
-
-func (r *Runtime) messageToChat(m store.Message) llm.ChatMessage {
-	switch m.ContentType {
-	case store.ContentTypeToolCalls:
-		var data struct {
-			Text      string         `json:"text,omitempty"`
-			ToolCalls []llm.ToolCall `json:"tool_calls"`
-		}
-		if err := json.Unmarshal([]byte(m.Content), &data); err == nil {
-			return llm.ChatMessage{
-				Role:      m.Role,
-				Content:   data.Text,
-				ToolCalls: data.ToolCalls,
-			}
-		}
-
-	case store.ContentTypeToolResults:
-		var results []llm.ToolResult
-		if err := json.Unmarshal([]byte(m.Content), &results); err == nil {
-			return llm.ChatMessage{
-				Role:        m.Role,
-				ToolResults: results,
-			}
-		}
-	}
-
-	return llm.ChatMessage{
-		Role:    m.Role,
-		Content: m.Content,
-	}
 }
 
 func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*store.Session, error) {
