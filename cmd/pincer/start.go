@@ -261,7 +261,7 @@ func createProvider(cfg *config.Config, logger *slog.Logger) (llm.Provider, erro
 
 	switch {
 	case hasPrefix(model, "claude-"):
-		return llm.NewAnthropicProvider("", cfg.Agent.BaseURL)
+		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL)
 	case hasPrefix(model, "gpt-") || hasPrefix(model, "o3-") || hasPrefix(model, "o4-"):
 		return llm.NewOpenAIProvider("", "")
 	case hasPrefix(model, "gemini-"):
@@ -271,7 +271,7 @@ func createProvider(cfg *config.Config, logger *slog.Logger) (llm.Provider, erro
 	default:
 
 		logger.Info("defaulting to anthropic provider", slog.String("model", model))
-		return llm.NewAnthropicProvider("", cfg.Agent.BaseURL)
+		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL)
 	}
 }
 

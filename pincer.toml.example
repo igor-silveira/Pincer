@@ -1,0 +1,68 @@
+[gateway]
+bind = "loopback"
+port = 18789
+# auth_token = ""
+
+[agent]
+model = "claude-sonnet-4-20250514"
+# api_key_env = ""
+# base_url = ""
+# fallback_models = ["gpt-4o", "gemini-2.0-flash"]
+max_context_tokens = 128000
+tool_approval = "ask"
+# system_prompt = ""
+
+[sandbox]
+mode = "process"
+network_policy = "deny"
+max_timeout = "5m"
+
+[memory]
+immutable_keys = ["identity", "core_values"]
+max_versions = 100
+# vector_search = false
+
+[store]
+driver = "sqlite"
+#dsn = "~/.pincer/pincer.db"
+
+[log]
+level = "info"
+format = "json"
+
+[tracing]
+# enabled = false
+# endpoint = ""
+
+[skills]
+# dir = ""
+# allow_unsigned = false
+
+[credentials]
+# master_key_env = "PINCER_MASTER_KEY"
+
+[soul]
+# path = "soul.toml"
+
+# Channel adapters. Uncomment and configure as needed.
+#
+[channels.telegram]
+enabled = true
+token_env = "TELEGRAM_BOT_TOKEN"
+#
+# [channels.discord]
+# enabled = true
+# token_env = "DISCORD_BOT_TOKEN"
+#
+# [channels.slack]
+# enabled = true
+# token_env = "SLACK_BOT_TOKEN"
+#
+# [channels.whatsapp]
+# enabled = true
+#
+# [channels.matrix]
+# enabled = true
+#
+# [channels.webchat]
+# enabled = true
