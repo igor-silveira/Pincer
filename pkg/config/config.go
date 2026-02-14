@@ -31,6 +31,7 @@ type GatewayConfig struct {
 
 type AgentConfig struct {
 	Model            string   `toml:"model"`
+	APIKeyEnv        string   `toml:"api_key_env"`
 	BaseURL          string   `toml:"base_url"`
 	FallbackModels   []string `toml:"fallback_models"`
 	MaxContextTokens int      `toml:"max_context_tokens"`
