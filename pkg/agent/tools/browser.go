@@ -58,9 +58,9 @@ func (t *BrowserTool) Definition() llm.ToolDefinition {
 }
 
 func (t *BrowserTool) Execute(ctx context.Context, input json.RawMessage, _ sandbox.Sandbox, policy sandbox.Policy) (string, error) {
-	var in browserInput
-	if err := json.Unmarshal(input, &in); err != nil {
-		return "", fmt.Errorf("browser: invalid input: %w", err)
+	in, err := parseInput[browserInput](input, "browser")
+	if err != nil {
+		return "", err
 	}
 
 	if policy.NetworkAccess == sandbox.NetworkDeny {

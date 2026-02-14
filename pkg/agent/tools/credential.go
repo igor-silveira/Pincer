@@ -48,9 +48,9 @@ func (t *CredentialTool) Definition() llm.ToolDefinition {
 }
 
 func (t *CredentialTool) Execute(ctx context.Context, input json.RawMessage, _ sandbox.Sandbox, _ sandbox.Policy) (string, error) {
-	var params credentialInput
-	if err := json.Unmarshal(input, &params); err != nil {
-		return "", fmt.Errorf("credential: invalid input: %w", err)
+	params, err := parseInput[credentialInput](input, "credential")
+	if err != nil {
+		return "", err
 	}
 
 	switch params.Action {
