@@ -200,7 +200,7 @@ type streamToolState struct {
 
 func (a *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, ch chan<- ChatEvent) {
 	defer close(ch)
-	defer func() { _ = body.Close() }()
+	defer body.Close()
 
 	scanner := bufio.NewScanner(body)
 
@@ -293,7 +293,7 @@ type anthropicFullResponse struct {
 
 func (a *AnthropicProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
 	defer close(ch)
-	defer func() { _ = body.Close() }()
+	defer body.Close()
 
 	var resp anthropicFullResponse
 	if err := json.NewDecoder(body).Decode(&resp); err != nil {

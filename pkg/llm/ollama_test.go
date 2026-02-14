@@ -7,8 +7,8 @@ import (
 
 func TestNewOllamaProvider_DefaultURL(t *testing.T) {
 	orig := os.Getenv("OLLAMA_BASE_URL")
-	_ = os.Unsetenv("OLLAMA_BASE_URL")
-	defer func() { _ = os.Setenv("OLLAMA_BASE_URL", orig) }()
+	os.Unsetenv("OLLAMA_BASE_URL")
+	defer os.Setenv("OLLAMA_BASE_URL", orig)
 
 	p, err := NewOllamaProvider("", "")
 	if err != nil {

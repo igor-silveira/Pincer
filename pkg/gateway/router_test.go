@@ -236,7 +236,7 @@ func TestSendApprovalRequestUsesApprovalSender(t *testing.T) {
 		t.Errorf("ToolName = %q, want %q", got.ToolName, "shell")
 	}
 
-	sent := adapter.getSent()
+	sent := adapter.fakeAdapter.getSent()
 	if len(sent) != 0 {
 		t.Error("expected no text fallback when ApprovalSender is implemented")
 	}
