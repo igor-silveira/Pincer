@@ -34,6 +34,8 @@ A self-hosted, security-first AI assistant gateway written in Go. Pincer connect
 - **Observability** - Structured logging via slog, Prometheus metrics, OpenTelemetry tracing, and append-only audit log
 - **Companion devices** - gRPC-based node system for mobile and desktop peripherals
 - **Proactive messaging** - Schedule delayed turns and send messages via the notify tool, with full audit logging
+- **MCP client** - Connect to external MCP servers (via stdio) and import their tools as native Pincer tools
+- **A2A server** - Expose Pincer as an Agent-to-Agent protocol endpoint with Agent Card discovery, task management, and SSE streaming
 - **Scheduler** - Interval-based cron jobs and HMAC-signed webhook ingestion
 - **Single binary** - Zero runtime dependencies, pure Go (no CGo)
 
@@ -103,6 +105,20 @@ format = "json"
 [tracing]
 enabled = false
 endpoint = "localhost:4318"
+
+[mcp]
+enabled = true
+
+[[mcp.servers]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "ghp_..." }
+
+[a2a]
+enabled = true
+auth_token = "secret-a2a-token"
+external_url = "https://pincer.example.com"
 ```
 
 ### Channel adapters
@@ -168,6 +184,7 @@ pkg/
     telegram/           Telegram adapter (go-telegram/bot)
     webchat/            WebChat adapter (built-in)
     whatsapp/           WhatsApp adapter (whatsmeow)
+  a2a/                A2A protocol server (Agent Card, JSON-RPC, task store)
   config/             TOML configuration loading
   credentials/        AES-256-GCM encrypted credential store
   gateway/            HTTP/WebSocket server and routing
@@ -176,6 +193,7 @@ pkg/
     openai.go           OpenAI Chat Completions API
     gemini.go           Google Gemini API
     ollama.go           Ollama (OpenAI-compatible)
+  mcp/                MCP client (server connections, tool import)
   memory/             Persistent structured memory
   nodes/              gRPC companion device hub
   sandbox/            Process and container sandboxing
@@ -202,6 +220,49 @@ Pincer routes to the correct provider based on the model name prefix:
 **Process isolation** (default) - Runs tools as child processes with timeout enforcement, output limits, work directory validation, and environment restrictions. File tools enforce `allowed_paths` and `read_only_paths` with symlink-aware path resolution. HTTP and browser tools respect the `network_policy` setting.
 
 **Container isolation** - Runs tools inside ephemeral containers with read-only root filesystem, dropped capabilities, no network by default, and memory/PID limits.
+
+### MCP client
+
+Pincer can connect to external [Model Context Protocol](https://modelcontextprotocol.io/) servers and import their tools. Each MCP server runs as a subprocess (stdio transport), and its tools are registered with a `mcp_{server}__{tool}` naming convention.
+
+```toml
+[mcp]
+enabled = true
+
+[[mcp.servers]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "ghp_..." }
+
+[[mcp.servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/data"]
+```
+
+MCP connections and disconnections are recorded in the audit log.
+
+### A2A server
+
+Pincer can expose itself as an [Agent-to-Agent (A2A)](https://google.github.io/A2A/) compatible agent. Other agents can discover Pincer via its Agent Card and send tasks over JSON-RPC 2.0.
+
+| Endpoint | Description |
+|---|---|
+| `GET /.well-known/agentcard` | Agent Card discovery |
+| `POST /a2a` | JSON-RPC 2.0 dispatch |
+| `POST /a2a/messages` | Send message (synchronous) |
+| `POST /a2a/messages:stream` | Send message (SSE streaming) |
+| `GET /a2a/tasks/{id}` | Get task status |
+| `GET /a2a/tasks` | List tasks |
+| `POST /a2a/tasks/{id}:cancel` | Cancel a task |
+
+```toml
+[a2a]
+enabled = true
+auth_token = "secret-a2a-token"
+external_url = "https://pincer.example.com"
+```
 
 ### Security model
 
