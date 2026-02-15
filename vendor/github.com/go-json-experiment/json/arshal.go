@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !goexperiment.jsonv2 || !go1.25
+
 package json
 
 import (
@@ -9,8 +11,6 @@ import (
 	"encoding"
 	"io"
 	"reflect"
-	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -50,11 +50,13 @@ var export = jsontext.Internal.Export(&internal.AllowInternalUse)
 //
 //   - If any type-specific functions in a [WithMarshalers] option match
 //     the value type, then those functions are called to encode the value.
-//     If all applicable functions return [SkipFunc],
+//     If all applicable functions return [errors.ErrUnsupported],
 //     then the value is encoded according to subsequent rules.
 //
 //   - If the value type implements [MarshalerTo],
 //     then the MarshalJSONTo method is called to encode the value.
+//     If the method returns [errors.ErrUnsupported],
+//     then the input is encoded according to subsequent rules.
 //
 //   - If the value type implements [Marshaler],
 //     then the MarshalJSON method is called to encode the value.
@@ -265,11 +267,13 @@ func marshalEncode(out *jsontext.Encoder, in any, mo *jsonopts.Struct) (err erro
 //
 //   - If any type-specific functions in a [WithUnmarshalers] option match
 //     the value type, then those functions are called to decode the JSON
-//     value. If all applicable functions return [SkipFunc],
+//     value. If all applicable functions return [errors.ErrUnsupported],
 //     then the input is decoded according to subsequent rules.
 //
 //   - If the value type implements [UnmarshalerFrom],
 //     then the UnmarshalJSONFrom method is called to decode the JSON value.
+//     If the method returns [errors.ErrUnsupported],
+//     then the input is decoded according to subsequent rules.
 //
 //   - If the value type implements [Unmarshaler],
 //     then the UnmarshalJSON method is called to decode the JSON value.
@@ -438,8 +442,9 @@ func UnmarshalRead(in io.Reader, out any, opts ...Options) (err error) {
 // Unlike [Unmarshal] and [UnmarshalRead], decode options are ignored because
 // they must have already been specified on the provided [jsontext.Decoder].
 //
-// The input may be a stream of one or more JSON values,
+// The input may be a stream of zero or more JSON values,
 // where this only unmarshals the next JSON value in the stream.
+// If there are no more top-level JSON values, it reports [io.EOF].
 // The output must be a non-nil pointer.
 // See [Unmarshal] for details about the conversion of JSON into a Go value.
 func UnmarshalDecode(in *jsontext.Decoder, out any, opts ...Options) (err error) {
@@ -468,7 +473,7 @@ func unmarshalDecode(in *jsontext.Decoder, out any, uo *jsonopts.Struct, last bo
 	// was validated before attempting to unmarshal it.
 	if uo.Flags.Get(jsonflags.ReportErrorsWithLegacySemantics) {
 		if err := export.Decoder(in).CheckNextValue(last); err != nil {
-			if err == io.EOF {
+			if err == io.EOF && last {
 				offset := in.InputOffset() + int64(len(in.UnreadBuffer()))
 				return &jsontext.SyntacticError{ByteOffset: offset, Err: io.ErrUnexpectedEOF}
 			}
@@ -485,7 +490,7 @@ func unmarshalDecode(in *jsontext.Decoder, out any, uo *jsonopts.Struct, last bo
 		if !uo.Flags.Get(jsonflags.AllowDuplicateNames) {
 			export.Decoder(in).Tokens.InvalidateDisabledNamespaces()
 		}
-		if err == io.EOF {
+		if err == io.EOF && last {
 			offset := in.InputOffset() + int64(len(in.UnreadBuffer()))
 			return &jsontext.SyntacticError{ByteOffset: offset, Err: io.ErrUnexpectedEOF}
 		}
@@ -570,9 +575,6 @@ func putStrings(s *stringSlice) {
 	if cap(*s) > 1<<10 {
 		*s = nil // avoid pinning arbitrarily large amounts of memory
 	}
+	clear(*s) // avoid pinning a reference to each string
 	stringsPools.Put(s)
-}
-
-func (ss *stringSlice) Sort() {
-	slices.SortFunc(*ss, func(x, y string) int { return strings.Compare(x, y) })
 }

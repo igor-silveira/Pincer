@@ -19,25 +19,27 @@ import (
 )
 
 type Gateway struct {
-	server    *http.Server
-	router    *chi.Mux
-	runtime   *agent.Runtime
-	chat      *webchat.Adapter
-	approver  *agent.Approver
-	logger    *slog.Logger
-	webhooks  http.Handler
-	authToken string
+	server     *http.Server
+	router     *chi.Mux
+	runtime    *agent.Runtime
+	chat       *webchat.Adapter
+	approver   *agent.Approver
+	logger     *slog.Logger
+	webhooks   http.Handler
+	a2aHandler http.Handler
+	authToken  string
 }
 
 type Config struct {
-	Bind      string
-	Port      int
-	Runtime   *agent.Runtime
-	Chat      *webchat.Adapter
-	Approver  *agent.Approver
-	Logger    *slog.Logger
-	Webhooks  http.Handler
-	AuthToken string
+	Bind       string
+	Port       int
+	Runtime    *agent.Runtime
+	Chat       *webchat.Adapter
+	Approver   *agent.Approver
+	Logger     *slog.Logger
+	Webhooks   http.Handler
+	A2AHandler http.Handler
+	AuthToken  string
 }
 
 func New(cfg Config) *Gateway {
@@ -51,13 +53,14 @@ func New(cfg Config) *Gateway {
 	r.Use(middleware.RealIP)
 
 	g := &Gateway{
-		router:    r,
-		runtime:   cfg.Runtime,
-		chat:      cfg.Chat,
-		approver:  cfg.Approver,
-		logger:    cfg.Logger,
-		webhooks:  cfg.Webhooks,
-		authToken: cfg.AuthToken,
+		router:     r,
+		runtime:    cfg.Runtime,
+		chat:       cfg.Chat,
+		approver:   cfg.Approver,
+		logger:     cfg.Logger,
+		webhooks:   cfg.Webhooks,
+		a2aHandler: cfg.A2AHandler,
+		authToken:  cfg.AuthToken,
 	}
 
 	g.registerRoutes()
@@ -77,6 +80,10 @@ func (g *Gateway) registerRoutes() {
 	g.router.Get("/healthz", g.handleHealthz)
 	g.router.Get("/readyz", g.handleReadyz)
 	g.router.Handle("/metrics", promhttp.Handler())
+
+	if g.a2aHandler != nil {
+		g.router.Mount("/", g.a2aHandler)
+	}
 
 	g.router.Group(func(r chi.Router) {
 		if g.authToken != "" {

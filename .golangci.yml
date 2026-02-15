@@ -1,0 +1,16 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - os.Setenv
+        - os.Unsetenv
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      - linters:
+          - errcheck
+        source: "Close\\(\\)"
