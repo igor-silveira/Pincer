@@ -31,6 +31,12 @@ func (r *Registry) Register(t Tool) {
 	r.tools[t.Definition().Name] = t
 }
 
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 func (r *Registry) Get(name string) (Tool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

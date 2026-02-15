@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,7 +25,10 @@ import (
 	"github.com/igorsilveira/pincer/pkg/credentials"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
+	"github.com/igorsilveira/pincer/pkg/a2a"
+	"github.com/igorsilveira/pincer/pkg/mcp"
 	"github.com/igorsilveira/pincer/pkg/memory"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/scheduler"
 	"github.com/igorsilveira/pincer/pkg/skills"
@@ -86,14 +90,14 @@ func initStorage(cfg *config.Config, logger *slog.Logger) (*storeDeps, error) {
 	return &storeDeps{db: db, auditLog: auditLog, mem: mem, credStore: credStore}, nil
 }
 
-func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps *storeDeps) (*agent.Runtime, *tools.Registry, *agent.Approver, error) {
+func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps *storeDeps) (*agent.Runtime, *tools.Registry, *agent.Approver, *soul.Soul, error) {
 	soulPath := cfg.Soul.Path
 	if soulPath == "" {
 		soulPath = filepath.Join(config.DataDir(), "soul.toml")
 	}
 	soulDef, err := soul.Load(soulPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("loading soul: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("loading soul: %w", err)
 	}
 	if err := soulDef.SeedMemory(ctx, deps.mem, "default"); err != nil {
 		logger.Warn("soul memory seeding had errors", slog.String("err", err.Error()))
@@ -105,13 +109,13 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 
 	provider, err := createProvider(cfg, logger)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating LLM provider: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("creating LLM provider: %w", err)
 	}
 	logger.Info("llm provider ready", slog.String("provider", provider.Name()))
 
 	sb, err := createSandbox(cfg)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("creating sandbox: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("creating sandbox: %w", err)
 	}
 	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
 
@@ -179,7 +183,7 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 	_ = deps.auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
 		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
 
-	return runtime, registry, approver, nil
+	return runtime, registry, approver, soulDef, nil
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
@@ -228,9 +232,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	defer deps.db.Close()
 
-	runtime, registry, approver, err := initAgent(ctx, cfg, logger, deps)
+	runtime, registry, approver, soulDef, err := initAgent(ctx, cfg, logger, deps)
 	if err != nil {
 		return err
+	}
+
+	mcpMgr := initMCPServers(ctx, cfg, logger, registry, deps.auditLog)
+	if mcpMgr != nil {
+		defer mcpMgr.DisconnectAll()
 	}
 
 	webhookSecret := os.Getenv("PINCER_WEBHOOK_SECRET")
@@ -257,15 +266,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	var a2aHandler http.Handler
+	if cfg.A2A.Enabled {
+		a2aHandler = initA2AHandler(cfg, runtime, registry, soulDef, deps.auditLog, logger)
+	}
+
 	gw := gateway.New(gateway.Config{
-		Bind:      cfg.Gateway.Bind,
-		Port:      cfg.Gateway.Port,
-		Runtime:   runtime,
-		Chat:      chat,
-		Approver:  approver,
-		Logger:    logger,
-		Webhooks:  webhooks,
-		AuthToken: cfg.Gateway.AuthToken,
+		Bind:       cfg.Gateway.Bind,
+		Port:       cfg.Gateway.Port,
+		Runtime:    runtime,
+		Chat:       chat,
+		Approver:   approver,
+		Logger:     logger,
+		Webhooks:   webhooks,
+		A2AHandler: a2aHandler,
+		AuthToken:  cfg.Gateway.AuthToken,
 	})
 
 	logger.Info("pincer gateway ready",
@@ -379,6 +394,97 @@ func channelToken(cfg *config.Config, name string) string {
 		return os.Getenv(ch.TokenEnv)
 	}
 	return ""
+}
+
+func initA2AHandler(cfg *config.Config, runtime *agent.Runtime, registry *tools.Registry, soulDef *soul.Soul, auditLog *audit.Logger, logger *slog.Logger) http.Handler {
+	card := buildAgentCard(cfg, registry, soulDef)
+	handler := a2a.NewHandler(a2a.HandlerConfig{
+		Card:      card,
+		Runtime:   runtime,
+		AuditLog:  auditLog,
+		Logger:    logger,
+		AuthToken: cfg.A2A.AuthToken,
+	})
+	logger.Info("a2a server enabled",
+		slog.String("name", card.Name),
+		slog.Int("skills", len(card.Skills)),
+	)
+	return handler
+}
+
+func buildAgentCard(cfg *config.Config, registry *tools.Registry, soulDef *soul.Soul) *a2a.AgentCard {
+	url := cfg.A2A.ExternalURL
+	if url == "" {
+		url = fmt.Sprintf("http://127.0.0.1:%d", cfg.Gateway.Port)
+	}
+
+	var skills []a2a.Skill
+	for _, def := range registry.Definitions() {
+		skills = append(skills, a2a.Skill{
+			ID:          def.Name,
+			Name:        def.Name,
+			Description: def.Description,
+		})
+	}
+
+	return &a2a.AgentCard{
+		Name:        soulDef.Identity.Name,
+		Description: soulDef.Identity.Role,
+		URL:         url,
+		Version:     version,
+		Capabilities: a2a.Capabilities{
+			Streaming: true,
+		},
+		Skills: skills,
+	}
+}
+
+func initMCPServers(ctx context.Context, cfg *config.Config, logger *slog.Logger, registry *tools.Registry, auditLog *audit.Logger) *mcp.Manager {
+	if !cfg.MCP.Enabled || len(cfg.MCP.Servers) == 0 {
+		return nil
+	}
+
+	mgr := mcp.NewManager(logger)
+
+	for _, srv := range cfg.MCP.Servers {
+		if srv.Enabled != nil && !*srv.Enabled {
+			continue
+		}
+		if srv.Command == "" {
+			logger.Warn("mcp server has no command, skipping", slog.String("name", srv.Name))
+			continue
+		}
+
+		mcpTools, err := mgr.Connect(ctx, mcp.ServerConfig{
+			Name:    srv.Name,
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+		})
+		if err != nil {
+			logger.Error("mcp server connect failed",
+				slog.String("name", srv.Name),
+				slog.String("err", err.Error()),
+			)
+			continue
+		}
+
+		for _, t := range mcpTools {
+			name := srv.Name
+			sessionFn := func() (*mcpsdk.ClientSession, error) { return mgr.Session(name) }
+			registry.Register(mcp.NewMCPTool(name, t, sessionFn))
+		}
+
+		_ = auditLog.Log(ctx, audit.EventMCPConnect, "", "", "system",
+			fmt.Sprintf("server=%s tools=%d", srv.Name, len(mcpTools)))
+
+		logger.Info("mcp server ready",
+			slog.String("name", srv.Name),
+			slog.Int("tools", len(mcpTools)),
+		)
+	}
+
+	return mgr
 }
 
 func buildDefaultPolicy(cfg *config.Config) sandbox.Policy {
