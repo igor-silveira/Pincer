@@ -86,11 +86,16 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("whatsapp: no chat for session %s", msg.SessionID)
 	}
 
-	text := msg.Content
-	_, err := a.client.SendMessage(ctx, jid, &waE2E.Message{
-		Conversation: &text,
-	})
-	return err
+	chunks := channels.SplitMessage(msg.Content, 65536)
+	for _, chunk := range chunks {
+		text := chunk
+		if _, err := a.client.SendMessage(ctx, jid, &waE2E.Message{
+			Conversation: &text,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) Receive() <-chan channels.InboundMessage {

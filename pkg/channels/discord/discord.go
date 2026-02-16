@@ -85,20 +85,12 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("discord: no channel for session %s", msg.SessionID)
 	}
 
-	content := msg.Content
-	for len(content) > 0 {
-		chunk := content
-		if len(chunk) > 2000 {
-			chunk = content[:2000]
-			content = content[2000:]
-		} else {
-			content = ""
-		}
+	chunks := channels.SplitMessage(msg.Content, 2000)
+	for _, chunk := range chunks {
 		if _, err := a.session.ChannelMessageSend(channelID, chunk); err != nil {
 			return fmt.Errorf("discord: sending message: %w", err)
 		}
 	}
-
 	return nil
 }
 

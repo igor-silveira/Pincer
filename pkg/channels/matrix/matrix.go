@@ -91,8 +91,13 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("matrix: no room for session %s", msg.SessionID)
 	}
 
-	_, err := a.client.SendText(ctx, roomID, msg.Content)
-	return err
+	chunks := channels.SplitMessage(msg.Content, 65536)
+	for _, chunk := range chunks {
+		if _, err := a.client.SendText(ctx, roomID, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) Receive() <-chan channels.InboundMessage {
