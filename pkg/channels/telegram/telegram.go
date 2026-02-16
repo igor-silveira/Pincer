@@ -68,11 +68,16 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("telegram: no chat for session %s", msg.SessionID)
 	}
 
-	_, err := a.bot.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID,
-		Text:   msg.Content,
-	})
-	return err
+	chunks := channels.SplitMessage(msg.Content, 4096)
+	for _, chunk := range chunks {
+		if _, err := a.bot.SendMessage(ctx, &bot.SendMessageParams{
+			ChatID: chatID,
+			Text:   chunk,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) Receive() <-chan channels.InboundMessage {

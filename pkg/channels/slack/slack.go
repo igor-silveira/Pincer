@@ -81,10 +81,15 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("slack: no channel for session %s", msg.SessionID)
 	}
 
-	_, _, err := a.client.PostMessageContext(ctx, channelID,
-		slackapi.MsgOptionText(msg.Content, false),
-	)
-	return err
+	chunks := channels.SplitMessage(msg.Content, 40000)
+	for _, chunk := range chunks {
+		if _, _, err := a.client.PostMessageContext(ctx, channelID,
+			slackapi.MsgOptionText(chunk, false),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) Receive() <-chan channels.InboundMessage {
