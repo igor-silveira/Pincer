@@ -140,6 +140,17 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 	return err
 }
 
+func (a *Adapter) SendTyping(ctx context.Context, sessionID string) error {
+	if a.session == nil {
+		return fmt.Errorf("discord: not connected")
+	}
+	channelID, ok := a.sessions.Reverse(sessionID)
+	if !ok {
+		return fmt.Errorf("discord: no channel for session %s", sessionID)
+	}
+	return a.session.ChannelTyping(channelID)
+}
+
 func (a *Adapter) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionMessageComponent {
 		return

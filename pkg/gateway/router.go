@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,8 +84,11 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		cr.ensureSession(ctx, msg)
 	}
 
+	stopTyping := cr.startTypingLoop(ctx, adapter, msg.SessionID)
+
 	events, err := cr.runtime.RunTurn(ctx, msg.SessionID, msg.Content)
 	if err != nil {
+		stopTyping()
 		logger.Error("agent turn failed",
 			slog.String("channel", msg.ChannelName),
 			slog.String("err", err.Error()),
@@ -94,6 +98,8 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 
 	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, msg.SessionID, events,
 		"Sorry, I encountered an error processing your message.")
+
+	stopTyping()
 
 	if fullResponse == "" {
 		return
@@ -265,8 +271,11 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 
 	cr.AuditLog(ctx, audit.EventNotifyDeliver, sessionID, fmt.Sprintf("turn_id=%s prompt=%s", turnID, prompt))
 
+	stopTyping := cr.startTypingLoop(ctx, adapter, sessionID)
+
 	events, err := cr.runtime.RunTurn(ctx, sessionID, prompt)
 	if err != nil {
+		stopTyping()
 		logger.Error("notify: agent turn failed",
 			slog.String("session_id", sessionID),
 			slog.String("err", err.Error()),
@@ -276,6 +285,8 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 
 	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, sessionID, events,
 		"Sorry, I encountered an error processing a scheduled task.")
+
+	stopTyping()
 
 	if fullResponse == "" {
 		return
@@ -290,6 +301,46 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 			slog.String("err", err.Error()),
 		)
 	}
+}
+
+func (cr *ChannelRouter) startTypingLoop(ctx context.Context, adapter channels.Adapter, sessionID string) func() {
+	typer, ok := adapter.(channels.TypingIndicator)
+	if !ok {
+		return func() {}
+	}
+
+	var once sync.Once
+	done := make(chan struct{})
+	stop := func() { once.Do(func() { close(done) }) }
+
+	if err := typer.SendTyping(ctx, sessionID); err != nil {
+		cr.logger.Debug("typing indicator failed",
+			slog.String("channel", adapter.Name()),
+			slog.String("err", err.Error()),
+		)
+	}
+
+	go func() {
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := typer.SendTyping(ctx, sessionID); err != nil {
+					cr.logger.Debug("typing indicator failed",
+						slog.String("channel", adapter.Name()),
+						slog.String("err", err.Error()),
+					)
+				}
+			}
+		}
+	}()
+
+	return stop
 }
 
 func (cr *ChannelRouter) AuditLog(ctx context.Context, eventType, sessionID, detail string) {

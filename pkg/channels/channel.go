@@ -37,6 +37,10 @@ type ApprovalSender interface {
 	SendApprovalRequest(ctx context.Context, req ApprovalRequest) error
 }
 
+type TypingIndicator interface {
+	SendTyping(ctx context.Context, sessionID string) error
+}
+
 type Adapter interface {
 	Name() string
 

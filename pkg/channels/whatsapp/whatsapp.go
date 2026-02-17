@@ -110,6 +110,14 @@ func (a *Adapter) Capabilities() channels.ChannelCaps {
 	}
 }
 
+func (a *Adapter) SendTyping(ctx context.Context, sessionID string) error {
+	jid, ok := a.sessions.Reverse(sessionID)
+	if !ok {
+		return fmt.Errorf("whatsapp: no chat for session %s", sessionID)
+	}
+	return a.client.SendChatPresence(ctx, jid, types.ChatPresenceComposing, types.ChatPresenceMediaText)
+}
+
 func (a *Adapter) handleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
