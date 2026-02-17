@@ -119,6 +119,18 @@ func (a *Adapter) SendApprovalRequest(ctx context.Context, req channels.Approval
 	return err
 }
 
+func (a *Adapter) SendTyping(ctx context.Context, sessionID string) error {
+	chatID, ok := a.sessions.Reverse(sessionID)
+	if !ok {
+		return fmt.Errorf("telegram: no chat for session %s", sessionID)
+	}
+	_, err := a.bot.SendChatAction(ctx, &bot.SendChatActionParams{
+		ChatID: chatID,
+		Action: models.ChatActionTyping,
+	})
+	return err
+}
+
 func (a *Adapter) handleCallbackQuery(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.CallbackQuery == nil {
 		return

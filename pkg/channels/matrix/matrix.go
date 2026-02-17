@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
@@ -110,6 +111,15 @@ func (a *Adapter) Capabilities() channels.ChannelCaps {
 		SupportsMedia:     true,
 		SupportsReactions: true,
 	}
+}
+
+func (a *Adapter) SendTyping(ctx context.Context, sessionID string) error {
+	roomID, ok := a.sessions.Reverse(sessionID)
+	if !ok {
+		return fmt.Errorf("matrix: no room for session %s", sessionID)
+	}
+	_, err := a.client.UserTyping(ctx, roomID, true, 10*time.Second)
+	return err
 }
 
 func (a *Adapter) handleMessage(evt *event.Event) {
