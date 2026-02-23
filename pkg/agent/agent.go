@@ -23,6 +23,7 @@ import (
 )
 
 const maxToolIterations = 10
+const maxSubagentDepth = 3
 
 type agentCtxKey int
 
@@ -455,6 +456,147 @@ func (r *Runtime) auditLog(ctx context.Context, eventType, sessionID, actor, det
 		return
 	}
 	_ = r.audit.Log(ctx, eventType, sessionID, tools.AgentIDFromContext(ctx), actor, detail)
+}
+
+func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []string) (string, error) {
+	depth := tools.SubagentDepthFromContext(ctx)
+	if depth >= maxSubagentDepth {
+		return "", fmt.Errorf("subagent depth limit exceeded (max %d)", maxSubagentDepth)
+	}
+
+	ctx = tools.WithSubagentDepth(ctx, depth+1)
+	ctx = WithAutoApprove(ctx)
+
+	registry := r.registry
+	if len(allowedTools) > 0 {
+		registry = registry.Filter(allowedTools)
+	}
+	registry = registry.Without([]string{"subagent", "spawn"})
+
+	sessionID := tools.SessionIDFromContext(ctx)
+	agentID := tools.AgentIDFromContext(ctx)
+	systemPrompt := r.buildSubagentContext(ctx, agentID, sessionID)
+
+	logger := telemetry.FromContext(ctx)
+
+	messages := make([]llm.ChatMessage, 0, 1)
+	messages = append(messages, llm.ChatMessage{
+		Role:    llm.RoleUser,
+		Content: prompt,
+	})
+
+	var toolDefs []llm.ToolDefinition
+	if registry != nil && r.provider.SupportsToolUse() {
+		toolDefs = registry.Definitions()
+	}
+
+	for iteration := 0; iteration < maxToolIterations; iteration++ {
+		events, err := r.provider.Chat(ctx, llm.ChatRequest{
+			Model:     r.model,
+			System:    systemPrompt,
+			Messages:  messages,
+			MaxTokens: r.maxOutputTokens,
+			Stream:    false,
+			Tools:     toolDefs,
+		})
+		if err != nil {
+			return "", fmt.Errorf("calling LLM: %w", err)
+		}
+
+		var textContent []byte
+		var toolCalls []llm.ToolCall
+
+		for ev := range events {
+			switch ev.Type {
+			case llm.EventToken:
+				textContent = append(textContent, ev.Token...)
+			case llm.EventToolCall:
+				toolCalls = append(toolCalls, *ev.ToolCall)
+			case llm.EventError:
+				return "", fmt.Errorf("LLM error: %w", ev.Error)
+			}
+		}
+
+		if len(toolCalls) == 0 {
+			return string(textContent), nil
+		}
+
+		assistantMsg := llm.ChatMessage{
+			Role:      llm.RoleAssistant,
+			Content:   string(textContent),
+			ToolCalls: toolCalls,
+		}
+		messages = append(messages, assistantMsg)
+
+		var toolResults []llm.ToolResult
+		for _, tc := range toolCalls {
+			result := executeSubagentTool(ctx, logger, sessionID, tc, registry, r.sandbox, r.defaultPolicy)
+			toolResults = append(toolResults, result)
+		}
+
+		messages = append(messages, llm.ChatMessage{
+			Role:        llm.RoleUser,
+			ToolResults: toolResults,
+		})
+	}
+
+	return "(max tool iterations reached)", nil
+}
+
+func (r *Runtime) buildSubagentContext(ctx context.Context, agentID, sessionID string) string {
+	systemPrompt := r.systemPrompt
+
+	if r.memory != nil {
+		memCtx, _, err := r.memory.BuildContext(ctx, agentID, make(map[string]string))
+		if err == nil && memCtx != "" {
+			systemPrompt += "\n\n" + memCtx
+		}
+	}
+
+	return systemPrompt
+}
+
+func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID string, tc llm.ToolCall, registry *tools.Registry, sb sandbox.Sandbox, defaultPolicy sandbox.Policy) llm.ToolResult {
+	if registry == nil {
+		return llm.ToolResult{
+			ToolCallID: tc.ID,
+			Content:    "no tools available",
+			IsError:    true,
+		}
+	}
+
+	tool, err := registry.Get(tc.Name)
+	if err != nil {
+		return llm.ToolResult{
+			ToolCallID: tc.ID,
+			Content:    fmt.Sprintf("unknown tool: %s", tc.Name),
+			IsError:    true,
+		}
+	}
+
+	policy := defaultPolicy
+	if policy.Timeout == 0 {
+		policy = sandbox.DefaultPolicy()
+	}
+	policy.RequireApproval = false
+
+	output, err := tool.Execute(ctx, tc.Input, sb, policy)
+	if err != nil {
+		logger.Error("subagent tool execution failed",
+			slog.String("tool", tc.Name),
+			slog.String("err", err.Error()),
+		)
+		return llm.ToolResult{
+			ToolCallID: tc.ID,
+			Content:    fmt.Sprintf("error: %v", err),
+			IsError:    true,
+		}
+	}
+
+	return llm.ToolResult{
+		ToolCallID: tc.ID,
+		Content:    output,
+	}
 }
 
 func ContentHash(content string) string {

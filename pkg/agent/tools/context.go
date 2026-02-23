@@ -7,6 +7,7 @@ type contextKey int
 const (
 	ctxKeySessionID contextKey = iota
 	ctxKeyAgentID
+	ctxKeySubagentDepth
 )
 
 func WithSessionInfo(ctx context.Context, sessionID, agentID string) context.Context {
@@ -27,4 +28,15 @@ func AgentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return "default"
+}
+
+func WithSubagentDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, ctxKeySubagentDepth, depth)
+}
+
+func SubagentDepthFromContext(ctx context.Context) int {
+	if v, ok := ctx.Value(ctxKeySubagentDepth).(int); ok {
+		return v
+	}
+	return 0
 }
