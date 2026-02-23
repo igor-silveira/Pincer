@@ -57,12 +57,45 @@ func (r *Registry) Definitions() []llm.ToolDefinition {
 	return defs
 }
 
+func (r *Registry) Filter(names []string) *Registry {
+	if len(names) == 0 {
+		return r
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	filtered := NewRegistry()
+	for _, name := range names {
+		if t, ok := r.tools[name]; ok {
+			filtered.tools[name] = t
+		}
+	}
+	return filtered
+}
+
+func (r *Registry) Without(names []string) *Registry {
+	if len(names) == 0 {
+		return r
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	exclude := make(map[string]bool, len(names))
+	for _, name := range names {
+		exclude[name] = true
+	}
+	filtered := NewRegistry()
+	for name, t := range r.tools {
+		if !exclude[name] {
+			filtered.tools[name] = t
+		}
+	}
+	return filtered
+}
+
 func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	r.Register(&ShellTool{})
 	r.Register(&FileReadTool{})
 	r.Register(&FileWriteTool{})
 	r.Register(&HTTPTool{})
-	r.Register(&BrowserTool{})
 	return r
 }

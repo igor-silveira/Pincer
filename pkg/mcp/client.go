@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -53,8 +54,11 @@ func (m *Manager) Connect(ctx context.Context, cfg ServerConfig) ([]*mcpsdk.Tool
 	}
 
 	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
-	for k, v := range cfg.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	if len(cfg.Env) > 0 {
+		cmd.Env = os.Environ()
+		for k, v := range cfg.Env {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
 	}
 
 	transport := &mcpsdk.CommandTransport{Command: cmd}

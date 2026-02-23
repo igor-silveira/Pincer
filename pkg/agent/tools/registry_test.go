@@ -106,7 +106,7 @@ func TestRegistry_UnregisterNonExistent(t *testing.T) {
 
 func TestDefaultRegistry_ContainsExpected(t *testing.T) {
 	r := DefaultRegistry()
-	expected := []string{"shell", "file_read", "file_write", "http_request", "browser"}
+	expected := []string{"shell", "file_read", "file_write", "http_request"}
 	for _, name := range expected {
 		if _, err := r.Get(name); err != nil {
 			t.Errorf("missing expected tool %q: %v", name, err)
@@ -117,7 +117,86 @@ func TestDefaultRegistry_ContainsExpected(t *testing.T) {
 func TestDefaultRegistry_Count(t *testing.T) {
 	r := DefaultRegistry()
 	defs := r.Definitions()
-	if len(defs) != 5 {
-		t.Errorf("DefaultRegistry has %d tools, want 5", len(defs))
+	if len(defs) != 4 {
+		t.Errorf("DefaultRegistry has %d tools, want 4", len(defs))
+	}
+}
+
+func TestRegistry_Filter_Subset(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+	r.Register(&dummyTool{name: "b"})
+	r.Register(&dummyTool{name: "c"})
+
+	filtered := r.Filter([]string{"a", "c"})
+	defs := filtered.Definitions()
+	if len(defs) != 2 {
+		t.Errorf("Filter len = %d, want 2", len(defs))
+	}
+	if _, err := filtered.Get("a"); err != nil {
+		t.Errorf("Filter should include 'a': %v", err)
+	}
+	if _, err := filtered.Get("c"); err != nil {
+		t.Errorf("Filter should include 'c': %v", err)
+	}
+	if _, err := filtered.Get("b"); err == nil {
+		t.Error("Filter should exclude 'b'")
+	}
+}
+
+func TestRegistry_Filter_Empty(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+
+	filtered := r.Filter(nil)
+	if filtered != r {
+		t.Error("Filter(nil) should return original registry")
+	}
+	filtered = r.Filter([]string{})
+	if filtered != r {
+		t.Error("Filter([]) should return original registry")
+	}
+}
+
+func TestRegistry_Filter_UnknownNames(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+
+	filtered := r.Filter([]string{"a", "nonexistent"})
+	if len(filtered.Definitions()) != 1 {
+		t.Errorf("Filter should have 1 tool, got %d", len(filtered.Definitions()))
+	}
+}
+
+func TestRegistry_Without_Excludes(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+	r.Register(&dummyTool{name: "b"})
+	r.Register(&dummyTool{name: "c"})
+
+	without := r.Without([]string{"b"})
+	defs := without.Definitions()
+	if len(defs) != 2 {
+		t.Errorf("Without len = %d, want 2", len(defs))
+	}
+	if _, err := without.Get("b"); err == nil {
+		t.Error("Without should exclude 'b'")
+	}
+	if _, err := without.Get("a"); err != nil {
+		t.Errorf("Without should keep 'a': %v", err)
+	}
+}
+
+func TestRegistry_Without_Empty(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&dummyTool{name: "a"})
+
+	without := r.Without(nil)
+	if without != r {
+		t.Error("Without(nil) should return original registry")
+	}
+	without = r.Without([]string{})
+	if without != r {
+		t.Error("Without([]) should return original registry")
 	}
 }

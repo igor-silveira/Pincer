@@ -30,6 +30,12 @@ const (
 	EventA2ATaskDone    = "a2a_task_done"
 	EventA2ATaskFail    = "a2a_task_fail"
 	EventA2ATaskCancel  = "a2a_task_cancel"
+	EventSubagentStart  = "subagent_start"
+	EventSubagentDone   = "subagent_done"
+	EventSubagentError  = "subagent_error"
+	EventSpawnStart     = "spawn_start"
+	EventSpawnDeliver   = "spawn_deliver"
+	EventSpawnError     = "spawn_error"
 )
 
 type Entry struct {
