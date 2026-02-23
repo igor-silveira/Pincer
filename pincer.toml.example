@@ -30,6 +30,14 @@ driver = "sqlite"
 level = "info"
 format = "json"
 
+[mcp]
+enabled = true
+
+[[mcp.servers]]
+name = "playwright"
+command = "npx"
+args = ["@playwright/mcp@latest"]
+
 [tracing]
 # enabled = false
 # endpoint = ""

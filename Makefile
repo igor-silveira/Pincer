@@ -1,5 +1,5 @@
 BINARY    := pincer
-VERSION   := 0.1.0
+VERSION   := 1.0.0
 LDFLAGS   := -s -w -X github.com/igorsilveira/pincer/cmd/pincer.version=$(VERSION)
 IMAGE     := pincer
 PORT      := 18789

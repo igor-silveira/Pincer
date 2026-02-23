@@ -63,6 +63,5 @@ func DefaultRegistry() *Registry {
 	r.Register(&FileReadTool{})
 	r.Register(&FileWriteTool{})
 	r.Register(&HTTPTool{})
-	r.Register(&BrowserTool{})
 	return r
 }
