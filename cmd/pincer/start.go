@@ -253,6 +253,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("starting webchat adapter: %w", err)
 	}
 
+	registry.Register(&tools.SubagentTool{
+		RunSubturn: runtime.RunSubturn,
+		AuditLog: func(ctx context.Context, eventType, sessionID, detail string) {
+			if deps.auditLog != nil {
+				_ = deps.auditLog.Log(ctx, eventType, sessionID, "", "subagent", detail)
+			}
+		},
+	})
+
 	channelAdapters := initChannelAdapters(ctx, cfg, logger)
 
 	if len(channelAdapters) > 0 {
@@ -263,6 +272,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 			RunAndDeliver: router.RunAndDeliver,
 			Send:          router.SendToSession,
 			AuditLog:      router.AuditLog,
+		})
+		registry.Register(&tools.SpawnTool{
+			RunSpawn:   router.RunSpawnAgent,
+			CheckSpawn: router.CheckSpawn,
+			AuditLog:   router.AuditLog,
 		})
 	}
 

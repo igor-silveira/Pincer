@@ -10,29 +10,39 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 )
 
+type spawnResult struct {
+	Done   bool
+	Result string
+	Error  string
+}
+
 type ChannelRouter struct {
-	runtime  *agent.Runtime
-	adapters []channels.Adapter
-	approver *agent.Approver
-	logger   *slog.Logger
-	store    *store.Store
-	audit    *audit.Logger
+	runtime        *agent.Runtime
+	adapters       []channels.Adapter
+	approver       *agent.Approver
+	logger         *slog.Logger
+	store          *store.Store
+	audit          *audit.Logger
+	spawnResults   map[string]*spawnResult
+	spawnResultsMu sync.Mutex
 }
 
 func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, approver *agent.Approver, logger *slog.Logger, db *store.Store, auditLog *audit.Logger) *ChannelRouter {
 	return &ChannelRouter{
-		runtime:  runtime,
-		adapters: adapters,
-		approver: approver,
-		logger:   logger,
-		store:    db,
-		audit:    auditLog,
+		runtime:      runtime,
+		adapters:     adapters,
+		approver:     approver,
+		logger:       logger,
+		store:        db,
+		audit:        auditLog,
+		spawnResults: make(map[string]*spawnResult),
 	}
 }
 
@@ -341,6 +351,80 @@ func (cr *ChannelRouter) startTypingLoop(ctx context.Context, adapter channels.A
 	}()
 
 	return stop
+}
+
+func (cr *ChannelRouter) RunSpawnAgent(ctx context.Context, sessionID, prompt string, allowedTools []string) string {
+	spawnID := uuid.NewString()
+
+	cr.spawnResultsMu.Lock()
+	cr.spawnResults[spawnID] = &spawnResult{Done: false}
+	cr.spawnResultsMu.Unlock()
+
+	cr.AuditLog(ctx, audit.EventSpawnStart, sessionID, fmt.Sprintf("spawn_id=%s task=%s", spawnID, prompt))
+
+	go func() {
+		spawnCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+
+		spawnCtx = telemetry.WithLogger(spawnCtx, cr.logger)
+		spawnCtx = agent.WithAutoApprove(spawnCtx)
+
+		origSessionID := tools.SessionIDFromContext(ctx)
+		origAgentID := tools.AgentIDFromContext(ctx)
+		if origSessionID != "" {
+			spawnCtx = tools.WithSessionInfo(spawnCtx, origSessionID, origAgentID)
+		} else {
+			spawnCtx = tools.WithSessionInfo(spawnCtx, sessionID, "default")
+		}
+
+		depth := tools.SubagentDepthFromContext(ctx)
+		spawnCtx = tools.WithSubagentDepth(spawnCtx, depth)
+
+		result, err := cr.runtime.RunSubturn(spawnCtx, prompt, allowedTools)
+
+		cr.spawnResultsMu.Lock()
+		if err != nil {
+			cr.spawnResults[spawnID] = &spawnResult{Done: true, Error: err.Error()}
+		} else {
+			cr.spawnResults[spawnID] = &spawnResult{Done: true, Result: result}
+		}
+		cr.spawnResultsMu.Unlock()
+
+		if err != nil {
+			cr.AuditLog(spawnCtx, audit.EventSpawnError, sessionID, fmt.Sprintf("spawn_id=%s error=%v", spawnID, err))
+			return
+		}
+
+		cr.AuditLog(spawnCtx, audit.EventSpawnDeliver, sessionID, fmt.Sprintf("spawn_id=%s result_len=%d", spawnID, len(result)))
+
+		deliverMsg := fmt.Sprintf("[Background Task Result]\n%s", result)
+		if err := cr.SendToSession(spawnCtx, sessionID, deliverMsg); err != nil {
+			cr.logger.Error("spawn: failed to deliver result",
+				slog.String("spawn_id", spawnID),
+				slog.String("session_id", sessionID),
+				slog.String("err", err.Error()),
+			)
+		}
+	}()
+
+	return spawnID
+}
+
+func (cr *ChannelRouter) CheckSpawn(spawnID string) (string, bool, error) {
+	cr.spawnResultsMu.Lock()
+	defer cr.spawnResultsMu.Unlock()
+
+	sr, ok := cr.spawnResults[spawnID]
+	if !ok {
+		return "", false, fmt.Errorf("unknown spawn ID: %s", spawnID)
+	}
+	if !sr.Done {
+		return "", false, nil
+	}
+	if sr.Error != "" {
+		return fmt.Sprintf("error: %s", sr.Error), true, nil
+	}
+	return sr.Result, true, nil
 }
 
 func (cr *ChannelRouter) AuditLog(ctx context.Context, eventType, sessionID, detail string) {
