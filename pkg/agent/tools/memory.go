@@ -102,7 +102,7 @@ func (t *MemoryTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 		}
 		var sb strings.Builder
 		for _, e := range entries {
-			sb.WriteString(fmt.Sprintf("[%s]: %s\n", e.Key, e.Value))
+			fmt.Fprintf(&sb, "[%s]: %s\n", e.Key, e.Value)
 		}
 		return sb.String(), nil
 
@@ -119,7 +119,7 @@ func (t *MemoryTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 		}
 		var sb strings.Builder
 		for _, e := range entries {
-			sb.WriteString(fmt.Sprintf("[%s]: %s\n", e.Key, e.Value))
+			fmt.Fprintf(&sb, "[%s]: %s\n", e.Key, e.Value)
 		}
 		return sb.String(), nil
 

@@ -288,7 +288,7 @@ func TestBrowserTool_NavigateIntegration(t *testing.T) {
 	}
 
 	input, _ = json.Marshal(browserInput{Action: "evaluate", Script: "document.title"})
-	result, err = bt.Execute(ctx, input, nil, sandbox.Policy{})
+	_, err = bt.Execute(ctx, input, nil, sandbox.Policy{})
 	if err != nil {
 		t.Fatalf("evaluate failed: %v", err)
 	}

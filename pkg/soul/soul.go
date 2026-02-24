@@ -117,35 +117,35 @@ const operationalGuidelines = `
 func (s *Soul) Render() string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("You are %s, a %s.\n", s.Identity.Name, s.Identity.Role))
+	fmt.Fprintf(&b, "You are %s, a %s.\n", s.Identity.Name, s.Identity.Role)
 
 	if len(s.Identity.Personality) > 0 {
-		b.WriteString(fmt.Sprintf("Personality: %s.\n", strings.Join(s.Identity.Personality, ", ")))
+		fmt.Fprintf(&b, "Personality: %s.\n", strings.Join(s.Identity.Personality, ", "))
 	}
 
 	if len(s.Values.Core) > 0 {
-		b.WriteString(fmt.Sprintf("Core values: %s.\n", strings.Join(s.Values.Core, ", ")))
+		fmt.Fprintf(&b, "Core values: %s.\n", strings.Join(s.Values.Core, ", "))
 	}
 	if s.Values.Priorities != "" {
-		b.WriteString(fmt.Sprintf("Priorities: %s.\n", s.Values.Priorities))
+		fmt.Fprintf(&b, "Priorities: %s.\n", s.Values.Priorities)
 	}
 
 	if s.Tone.Style != "" {
-		b.WriteString(fmt.Sprintf("Communication style: %s.\n", s.Tone.Style))
+		fmt.Fprintf(&b, "Communication style: %s.\n", s.Tone.Style)
 	}
 	if s.Tone.Verbosity != "" {
-		b.WriteString(fmt.Sprintf("Verbosity: %s.\n", s.Tone.Verbosity))
+		fmt.Fprintf(&b, "Verbosity: %s.\n", s.Tone.Verbosity)
 	}
 
 	if len(s.Expertise.Domains) > 0 {
-		b.WriteString(fmt.Sprintf("Areas of expertise: %s.\n", strings.Join(s.Expertise.Domains, ", ")))
+		fmt.Fprintf(&b, "Areas of expertise: %s.\n", strings.Join(s.Expertise.Domains, ", "))
 	}
 
 	if len(s.Boundaries.Refuse) > 0 {
-		b.WriteString(fmt.Sprintf("Always refuse to: %s.\n", strings.Join(s.Boundaries.Refuse, "; ")))
+		fmt.Fprintf(&b, "Always refuse to: %s.\n", strings.Join(s.Boundaries.Refuse, "; "))
 	}
 	if len(s.Boundaries.DisclaimerTopics) > 0 {
-		b.WriteString(fmt.Sprintf("Add disclaimers when discussing: %s.\n", strings.Join(s.Boundaries.DisclaimerTopics, ", ")))
+		fmt.Fprintf(&b, "Add disclaimers when discussing: %s.\n", strings.Join(s.Boundaries.DisclaimerTopics, ", "))
 	}
 
 	b.WriteString(operationalGuidelines)

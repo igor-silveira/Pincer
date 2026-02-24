@@ -72,7 +72,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 	var conv strings.Builder
 	for _, m := range oldMessages {
 		if m.ContentType == store.ContentTypeText && strings.HasPrefix(m.Content, "[Session Summary]") {
-			conv.WriteString(fmt.Sprintf("[Previous Summary]: %s\n\n", m.Content[len("[Session Summary]\n"):]))
+			fmt.Fprintf(&conv, "[Previous Summary]: %s\n\n", m.Content[len("[Session Summary]\n"):])
 			continue
 		}
 		if m.ContentType == store.ContentTypeToolCalls {
@@ -86,12 +86,12 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 					names = append(names, tc.Name)
 				}
 				if data.Text != "" {
-					conv.WriteString(fmt.Sprintf("%s: %s [called: %s]\n", m.Role, truncate(data.Text, 200), strings.Join(names, ", ")))
+					fmt.Fprintf(&conv, "%s: %s [called: %s]\n", m.Role, truncate(data.Text, 200), strings.Join(names, ", "))
 				} else {
-					conv.WriteString(fmt.Sprintf("%s: [called: %s]\n", m.Role, strings.Join(names, ", ")))
+					fmt.Fprintf(&conv, "%s: [called: %s]\n", m.Role, strings.Join(names, ", "))
 				}
 			} else {
-				conv.WriteString(fmt.Sprintf("[%s: tool interaction]\n", m.Role))
+				fmt.Fprintf(&conv, "[%s: tool interaction]\n", m.Role)
 			}
 			continue
 		}
@@ -103,18 +103,18 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 					if r.IsError {
 						status = "error"
 					}
-					conv.WriteString(fmt.Sprintf("[tool result (%s): %s]\n", status, truncate(r.Content, 150)))
+					fmt.Fprintf(&conv, "[tool result (%s): %s]\n", status, truncate(r.Content, 150))
 				}
 			} else {
-				conv.WriteString(fmt.Sprintf("[%s: tool results]\n", m.Role))
+				fmt.Fprintf(&conv, "[%s: tool results]\n", m.Role)
 			}
 			continue
 		}
 		if m.ContentType != store.ContentTypeText {
-			conv.WriteString(fmt.Sprintf("[%s: %s interaction]\n", m.Role, m.ContentType))
+			fmt.Fprintf(&conv, "[%s: %s interaction]\n", m.Role, m.ContentType)
 			continue
 		}
-		conv.WriteString(fmt.Sprintf("%s: %s\n\n", m.Role, m.Content))
+		fmt.Fprintf(&conv, "%s: %s\n\n", m.Role, m.Content)
 	}
 
 	prompt := fmt.Sprintf(compactionPrompt, conv.String())
