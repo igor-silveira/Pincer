@@ -29,6 +29,7 @@ const (
 	llmMaxRetries     = 3
 	llmBaseRetryDelay = 5 * time.Second
 	llmMaxRetryDelay  = 60 * time.Second
+	maxLLMErrors      = 2
 )
 
 func (r *Runtime) chatWithRetry(ctx context.Context, logger *slog.Logger, req llm.ChatRequest, notify func(string)) (<-chan llm.ChatEvent, error) {
@@ -233,6 +234,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		logger.Warn("session compaction failed", slog.String("err", err.Error()))
 	}
 
+	var llmErrors int
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 
 		history, err := r.store.RecentMessages(ctx, sessionID, 50)
@@ -266,13 +268,25 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		})
 		if err != nil {
 			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
-			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("calling LLM: %w", err)}
-			return
+			llmErrors++
+			if llmErrors > maxLLMErrors {
+				out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("calling LLM: %w", err)}
+				return
+			}
+			logger.Warn("llm call failed, injecting error context for retry",
+				slog.Int("llm_errors", llmErrors),
+				slog.String("err", err.Error()),
+			)
+			errMsg := fmt.Sprintf("[System: LLM call failed after retries: %s. Simplify your response or use fewer tool calls.]", truncate(err.Error(), 300))
+			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
+			out <- TurnEvent{Type: TurnProgress, Message: fmt.Sprintf("LLM error, retrying with error context (%d/%d)...", llmErrors, maxLLMErrors)}
+			continue
 		}
 
 		var textContent []byte
 		var toolCalls []llm.ToolCall
 		var usage *llm.Usage
+		var streamErr error
 
 		for ev := range events {
 			switch ev.Type {
@@ -288,12 +302,29 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				usage = ev.Usage
 
 			case llm.EventError:
-				telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
-				logger.Error("llm stream error", slog.String("err", ev.Error.Error()))
-				out <- TurnEvent{Type: TurnError, Error: ev.Error}
-				return
+				streamErr = ev.Error
 			}
 		}
+
+		if streamErr != nil {
+			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
+			llmErrors++
+			if llmErrors > maxLLMErrors {
+				logger.Error("llm stream error, max retries exceeded", slog.String("err", streamErr.Error()))
+				out <- TurnEvent{Type: TurnError, Error: streamErr}
+				return
+			}
+			logger.Warn("llm stream error, injecting error context for retry",
+				slog.Int("llm_errors", llmErrors),
+				slog.String("err", streamErr.Error()),
+			)
+			errMsg := fmt.Sprintf("[System: The response stream was interrupted: %s. Please retry your last action with a simpler approach.]", truncate(streamErr.Error(), 300))
+			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
+			out <- TurnEvent{Type: TurnProgress, Message: "Stream interrupted, retrying..."}
+			continue
+		}
+
+		llmErrors = 0
 
 		llmElapsed := time.Since(llmStart)
 		telemetry.Metrics.LLMRequestsTotal.WithLabelValues("default", r.model).Inc()
@@ -604,6 +635,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 		toolDefs = registry.Definitions()
 	}
 
+	var llmErrors int
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 		events, err := r.chatWithRetry(ctx, logger, llm.ChatRequest{
 			Model:     r.model,
@@ -614,11 +646,24 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			Tools:     toolDefs,
 		}, nil)
 		if err != nil {
-			return "", fmt.Errorf("calling LLM: %w", err)
+			llmErrors++
+			if llmErrors > maxLLMErrors {
+				return "", fmt.Errorf("calling LLM: %w", err)
+			}
+			logger.Warn("subagent llm call failed, injecting error context",
+				slog.Int("llm_errors", llmErrors),
+				slog.String("err", err.Error()),
+			)
+			messages = append(messages, llm.ChatMessage{
+				Role:    llm.RoleUser,
+				Content: fmt.Sprintf("[System: LLM call failed: %s. Simplify your approach.]", truncate(err.Error(), 300)),
+			})
+			continue
 		}
 
 		var textContent []byte
 		var toolCalls []llm.ToolCall
+		var streamErr error
 
 		for ev := range events {
 			switch ev.Type {
@@ -627,9 +672,27 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			case llm.EventToolCall:
 				toolCalls = append(toolCalls, *ev.ToolCall)
 			case llm.EventError:
-				return "", fmt.Errorf("LLM error: %w", ev.Error)
+				streamErr = ev.Error
 			}
 		}
+
+		if streamErr != nil {
+			llmErrors++
+			if llmErrors > maxLLMErrors {
+				return "", fmt.Errorf("LLM error: %w", streamErr)
+			}
+			logger.Warn("subagent stream error, injecting error context",
+				slog.Int("llm_errors", llmErrors),
+				slog.String("err", streamErr.Error()),
+			)
+			messages = append(messages, llm.ChatMessage{
+				Role:    llm.RoleUser,
+				Content: fmt.Sprintf("[System: Stream interrupted: %s. Please retry with a simpler approach.]", truncate(streamErr.Error(), 300)),
+			})
+			continue
+		}
+
+		llmErrors = 0
 
 		if len(toolCalls) == 0 {
 			return string(textContent), nil
