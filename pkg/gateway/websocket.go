@@ -138,6 +138,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					wsWrite(wsOutgoing{
 						Type:      "tool_call",
 						SessionID: sessionID,
+						Content:   ev.Message,
 						ToolName:  ev.ToolCall.Name,
 						ToolInput: string(ev.ToolCall.Input),
 					})
@@ -145,6 +146,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					wsWrite(wsOutgoing{
 						Type:      "tool_result",
 						SessionID: sessionID,
+						Content:   ev.Message,
 					})
 				case agent.TurnApprovalNeeded:
 					wsWrite(wsOutgoing{
@@ -164,6 +166,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					wsWrite(wsOutgoing{
 						Type:      "done",
 						SessionID: sessionID,
+						Content:   ev.Message,
 					})
 				case agent.TurnError:
 					wsWrite(wsOutgoing{

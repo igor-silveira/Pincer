@@ -225,7 +225,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 
 			case llm.EventToolCall:
 				toolCalls = append(toolCalls, *ev.ToolCall)
-				out <- TurnEvent{Type: TurnToolCall, ToolCall: ev.ToolCall}
+				out <- TurnEvent{Type: TurnToolCall, ToolCall: ev.ToolCall, Message: fmt.Sprintf("Calling %s...", ev.ToolCall.Name)}
 
 			case llm.EventDone:
 				usage = ev.Usage
@@ -251,7 +251,11 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			result := r.executeTool(ctx, logger, sessionID, tc, out)
 			toolResults = append(toolResults, result)
 			toolNames = append(toolNames, tc.Name)
-			out <- TurnEvent{Type: TurnToolResult}
+			msg := fmt.Sprintf("%s completed", tc.Name)
+			if result.IsError {
+				msg = fmt.Sprintf("%s failed: %s", tc.Name, truncate(result.Content, 200))
+			}
+			out <- TurnEvent{Type: TurnToolResult, Message: msg}
 		}
 
 		r.persistToolResultMessage(ctx, logger, sessionID, toolResults)
@@ -629,4 +633,11 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 func ContentHash(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(h[:])
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
