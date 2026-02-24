@@ -105,10 +105,11 @@ func (s *Store) List(ctx context.Context, agentID string) ([]Entry, error) {
 }
 
 func (s *Store) Search(ctx context.Context, agentID, query string) ([]Entry, error) {
-	pattern := "%" + query + "%"
+	escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(query)
+	pattern := "%" + escaped + "%"
 	var entries []Entry
 	err := s.db.WithContext(ctx).
-		Where("agent_id = ? AND (key LIKE ? OR value LIKE ?)", agentID, pattern, pattern).
+		Where("agent_id = ? AND (key LIKE ? ESCAPE '\\' OR value LIKE ? ESCAPE '\\')", agentID, pattern, pattern).
 		Order("updated_at DESC").
 		Find(&entries).Error
 	return entries, err

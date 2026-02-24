@@ -53,10 +53,10 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 
 	logger.Info("compacting session",
 		slog.String("session_id", sessionID),
-		slog.Int("message_count", count),
+		slog.Int64("message_count", count),
 	)
 
-	messages, err := r.store.RecentMessages(ctx, sessionID, count)
+	messages, err := r.store.RecentMessages(ctx, sessionID, int(count))
 	if err != nil {
 		return fmt.Errorf("loading messages: %w", err)
 	}
@@ -71,6 +71,10 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 
 	var conv strings.Builder
 	for _, m := range oldMessages {
+		if m.ContentType == store.ContentTypeText && strings.HasPrefix(m.Content, "[Session Summary]") {
+			conv.WriteString(fmt.Sprintf("[Previous Summary]: %s\n\n", m.Content[len("[Session Summary]\n"):]))
+			continue
+		}
 		if m.ContentType == store.ContentTypeToolCalls {
 			var data struct {
 				Text      string         `json:"text,omitempty"`

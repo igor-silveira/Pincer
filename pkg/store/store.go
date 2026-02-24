@@ -154,13 +154,13 @@ func (s *Store) RecentMessages(ctx context.Context, sessionID string, limit int)
 	return msgs, nil
 }
 
-func (s *Store) MessageCount(ctx context.Context, sessionID string) (int, error) {
+func (s *Store) MessageCount(ctx context.Context, sessionID string) (int64, error) {
 	var count int64
 	err := s.db.WithContext(ctx).
 		Model(&Message{}).
 		Where("session_id = ?", sessionID).
 		Count(&count).Error
-	return int(count), err
+	return count, err
 }
 
 func (s *Store) SessionTokenUsage(ctx context.Context, sessionID string) (int, error) {
