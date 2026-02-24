@@ -246,7 +246,7 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 
 func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID string) (string, error) {
 	var buf []byte
-	if err := chromedp.Run(browserCtx, chromedp.FullScreenshot(&buf, 80)); err != nil {
+	if err := chromedp.Run(browserCtx, chromedp.FullScreenshot(&buf, 100)); err != nil {
 		return "", fmt.Errorf("browser: screenshot failed: %w", err)
 	}
 
