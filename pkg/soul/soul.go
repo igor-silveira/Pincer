@@ -125,6 +125,8 @@ func (s *Soul) Render() string {
 		b.WriteString(fmt.Sprintf("Add disclaimers when discussing: %s.\n", strings.Join(s.Boundaries.DisclaimerTopics, ", ")))
 	}
 
+	b.WriteString("\nWhen a task requires multiple steps, complete them all by chaining tool calls. Do not stop between steps. Summarize at the end.\n")
+
 	return b.String()
 }
 

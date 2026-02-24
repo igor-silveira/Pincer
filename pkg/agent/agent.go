@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const maxToolIterations = 10
 const maxSubagentDepth = 3
 
 type agentCtxKey int
@@ -57,39 +57,42 @@ const (
 	TurnToolCall
 	TurnToolResult
 	TurnApprovalNeeded
+	TurnProgress
 )
 
 type Runtime struct {
-	provider      llm.Provider
-	store         *store.Store
-	registry      *tools.Registry
-	sandbox       sandbox.Sandbox
-	approver      *Approver
-	model           string
-	maxTokens       int
-	maxOutputTokens int
-	systemPrompt    string
-	memory        *memory.Store
-	audit         *audit.Logger
-	defaultPolicy sandbox.Policy
-	ctxBuilder    *ContextBuilder
-	memoryMu      sync.Mutex
-	memoryHashes  map[string]map[string]string
+	provider         llm.Provider
+	store            *store.Store
+	registry         *tools.Registry
+	sandbox          sandbox.Sandbox
+	approver         *Approver
+	model            string
+	maxTokens        int
+	maxOutputTokens  int
+	maxToolIter      int
+	systemPrompt     string
+	memory           *memory.Store
+	audit            *audit.Logger
+	defaultPolicy    sandbox.Policy
+	ctxBuilder       *ContextBuilder
+	memoryMu         sync.Mutex
+	memoryHashes     map[string]map[string]string
 }
 
 type RuntimeConfig struct {
-	Provider      llm.Provider
-	Store         *store.Store
-	Registry      *tools.Registry
-	Sandbox       sandbox.Sandbox
-	Approver      *Approver
-	Model           string
-	MaxTokens       int
-	MaxOutputTokens int
-	SystemPrompt    string
-	Memory        *memory.Store
-	Audit         *audit.Logger
-	DefaultPolicy sandbox.Policy
+	Provider         llm.Provider
+	Store            *store.Store
+	Registry         *tools.Registry
+	Sandbox          sandbox.Sandbox
+	Approver         *Approver
+	Model            string
+	MaxTokens        int
+	MaxOutputTokens  int
+	MaxToolIterations int
+	SystemPrompt     string
+	Memory           *memory.Store
+	Audit            *audit.Logger
+	DefaultPolicy    sandbox.Policy
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -98,6 +101,9 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	}
 	if cfg.MaxOutputTokens <= 0 {
 		cfg.MaxOutputTokens = 4096
+	}
+	if cfg.MaxToolIterations <= 0 {
+		cfg.MaxToolIterations = 25
 	}
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = defaultSystemPrompt
@@ -111,18 +117,22 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		model:           cfg.Model,
 		maxTokens:       cfg.MaxTokens,
 		maxOutputTokens: cfg.MaxOutputTokens,
+		maxToolIter:     cfg.MaxToolIterations,
 		systemPrompt:    cfg.SystemPrompt,
-		memory:        cfg.Memory,
-		audit:         cfg.Audit,
-		defaultPolicy: cfg.DefaultPolicy,
-		ctxBuilder:    NewContextBuilder(cfg.MaxTokens),
-		memoryHashes:  make(map[string]map[string]string),
+		memory:          cfg.Memory,
+		audit:           cfg.Audit,
+		defaultPolicy:   cfg.DefaultPolicy,
+		ctxBuilder:      NewContextBuilder(cfg.MaxTokens),
+		memoryHashes:    make(map[string]map[string]string),
 	}
 }
 
 const defaultSystemPrompt = `You are Pincer, a helpful AI assistant. Be concise and accurate.
 You have access to tools for executing shell commands, reading/writing files, and making HTTP requests.
-Use tools when needed to accomplish tasks. Always explain what you're doing.`
+
+When a task requires multiple steps, complete them all in a single turn by chaining tool calls.
+Do not stop to ask for confirmation between steps. If a tool call fails, try an alternative approach before giving up.
+Briefly summarize what you accomplished at the end.`
 
 func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<-chan TurnEvent, error) {
 	logger := telemetry.FromContext(ctx)
@@ -168,7 +178,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		logger.Warn("session compaction failed", slog.String("err", err.Error()))
 	}
 
-	for iteration := 0; iteration < maxToolIterations; iteration++ {
+	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 
 		history, err := r.store.RecentMessages(ctx, sessionID, 50)
 		if err != nil {
@@ -234,12 +244,19 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		r.persistToolCallMessage(ctx, logger, sessionID, string(textContent), toolCalls, usage)
 
 		var toolResults []llm.ToolResult
+		var toolNames []string
 		for _, tc := range toolCalls {
 			result := r.executeTool(ctx, logger, sessionID, tc, out)
 			toolResults = append(toolResults, result)
+			toolNames = append(toolNames, tc.Name)
 		}
 
 		r.persistToolResultMessage(ctx, logger, sessionID, toolResults)
+
+		out <- TurnEvent{
+			Type:    TurnProgress,
+			Message: fmt.Sprintf("Step %d: executed %s", iteration+1, strings.Join(toolNames, ", ")),
+		}
 
 		logger.Debug("tool iteration complete",
 			slog.Int("iteration", iteration+1),
@@ -247,7 +264,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		)
 	}
 
-	logger.Warn("max tool iterations reached", slog.Int("max", maxToolIterations))
+	logger.Warn("max tool iterations reached", slog.Int("max", r.maxToolIter))
 	out <- TurnEvent{Type: TurnDone, Message: "(max tool iterations reached)"}
 }
 
@@ -490,7 +507,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 		toolDefs = registry.Definitions()
 	}
 
-	for iteration := 0; iteration < maxToolIterations; iteration++ {
+	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 		events, err := r.provider.Chat(ctx, llm.ChatRequest{
 			Model:     r.model,
 			System:    systemPrompt,

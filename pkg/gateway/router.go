@@ -132,6 +132,16 @@ func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Log
 		switch ev.Type {
 		case agent.TurnApprovalNeeded:
 			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
+		case agent.TurnProgress:
+			if err := adapter.Send(ctx, channels.OutboundMessage{
+				SessionID: sessionID,
+				Content:   ev.Message,
+			}); err != nil {
+				logger.Debug("failed to send progress",
+					slog.String("session_id", sessionID),
+					slog.String("err", err.Error()),
+				)
+			}
 		case agent.TurnDone:
 			fullResponse = ev.Message
 		case agent.TurnError:

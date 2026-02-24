@@ -32,13 +32,14 @@ type GatewayConfig struct {
 }
 
 type AgentConfig struct {
-	Model            string   `toml:"model"`
-	APIKeyEnv        string   `toml:"api_key_env"`
-	BaseURL          string   `toml:"base_url"`
-	FallbackModels   []string `toml:"fallback_models"`
-	MaxContextTokens int      `toml:"max_context_tokens"`
-	ToolApproval     string   `toml:"tool_approval"`
-	SystemPrompt     string   `toml:"system_prompt"`
+	Model             string   `toml:"model"`
+	APIKeyEnv         string   `toml:"api_key_env"`
+	BaseURL           string   `toml:"base_url"`
+	FallbackModels    []string `toml:"fallback_models"`
+	MaxContextTokens  int      `toml:"max_context_tokens"`
+	MaxToolIterations int      `toml:"max_tool_iterations"`
+	ToolApproval      string   `toml:"tool_approval"`
+	SystemPrompt      string   `toml:"system_prompt"`
 }
 
 type ChannelConfig struct {
@@ -115,9 +116,10 @@ func Default() *Config {
 			Port: 18789,
 		},
 		Agent: AgentConfig{
-			Model:            "claude-sonnet-4-20250514",
-			MaxContextTokens: 128000,
-			ToolApproval:     "ask",
+			Model:             "claude-sonnet-4-20250514",
+			MaxContextTokens:  128000,
+			MaxToolIterations: 25,
+			ToolApproval:      "ask",
 		},
 		Sandbox: SandboxConfig{
 			Mode:          "process",

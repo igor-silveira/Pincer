@@ -167,17 +167,18 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 	approver := agent.NewApprover(approvalMode, nil)
 
 	runtime := agent.NewRuntime(agent.RuntimeConfig{
-		Provider:      provider,
-		Store:         deps.db,
-		Registry:      registry,
-		Sandbox:       sb,
-		Approver:      approver,
-		Model:         cfg.Agent.Model,
-		MaxTokens:     cfg.Agent.MaxContextTokens,
-		SystemPrompt:  systemPrompt,
-		Memory:        deps.mem,
-		Audit:         deps.auditLog,
-		DefaultPolicy: buildDefaultPolicy(cfg),
+		Provider:          provider,
+		Store:             deps.db,
+		Registry:          registry,
+		Sandbox:           sb,
+		Approver:          approver,
+		Model:             cfg.Agent.Model,
+		MaxTokens:         cfg.Agent.MaxContextTokens,
+		MaxToolIterations: cfg.Agent.MaxToolIterations,
+		SystemPrompt:      systemPrompt,
+		Memory:            deps.mem,
+		Audit:             deps.auditLog,
+		DefaultPolicy:     buildDefaultPolicy(cfg),
 	})
 
 	_ = deps.auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",

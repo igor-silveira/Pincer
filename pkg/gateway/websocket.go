@@ -145,6 +145,12 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					ToolName:  ev.ApprovalRequest.ToolName,
 					ToolInput: ev.ApprovalRequest.Input,
 				})
+			case agent.TurnProgress:
+				_ = wsjson.Write(ctx, conn, wsOutgoing{
+					Type:      "progress",
+					SessionID: sessionID,
+					Content:   ev.Message,
+				})
 			case agent.TurnDone:
 				_ = wsjson.Write(ctx, conn, wsOutgoing{
 					Type:      "done",

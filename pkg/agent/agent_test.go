@@ -401,13 +401,14 @@ func TestRunTurn_MaxIterations(t *testing.T) {
 	reg.Register(&tools.ShellTool{})
 
 	rt := NewRuntime(RuntimeConfig{
-		Provider:     fp,
-		Store:        s,
-		Registry:     reg,
-		Sandbox:      &fakeSandboxAgent{result: &sandbox.Result{Stdout: "loop", ExitCode: 0}},
-		Approver:     NewApprover(ApprovalAuto, nil),
-		Model:        "fake-1",
-		SystemPrompt: "test",
+		Provider:          fp,
+		Store:             s,
+		Registry:          reg,
+		Sandbox:           &fakeSandboxAgent{result: &sandbox.Result{Stdout: "loop", ExitCode: 0}},
+		Approver:          NewApprover(ApprovalAuto, nil),
+		Model:             "fake-1",
+		SystemPrompt:      "test",
+		MaxToolIterations: 10,
 	})
 
 	ch, err := rt.RunTurn(context.Background(), "sess-max", "loop forever")
@@ -425,7 +426,7 @@ func TestRunTurn_MaxIterations(t *testing.T) {
 	if len(doneEvents) != 1 {
 		t.Fatalf("expected 1 TurnDone, got %d", len(doneEvents))
 	}
-	if fp.calls > maxToolIterations+1 {
-		t.Errorf("provider called %d times, want <= %d", fp.calls, maxToolIterations+1)
+	if fp.calls > 10+1 {
+		t.Errorf("provider called %d times, want <= %d", fp.calls, 11)
 	}
 }
