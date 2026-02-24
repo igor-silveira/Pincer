@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
@@ -266,10 +267,34 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 	return taskCtx, nil
 }
 
+const maxImageBytes = 4_500_000
+
 func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID string) (string, error) {
 	var buf []byte
-	if err := chromedp.Run(browserCtx, chromedp.FullScreenshot(&buf, 100)); err != nil {
+	mediaType := "image/png"
+	ext := ".png"
+
+	if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var err error
+		buf, err = page.CaptureScreenshot().WithFormat(page.CaptureScreenshotFormatPng).Do(ctx)
+		return err
+	})); err != nil {
 		return "", fmt.Errorf("browser: screenshot failed: %w", err)
+	}
+
+	if len(buf) > maxImageBytes {
+		slog.Debug("screenshot exceeds size limit, retrying as JPEG",
+			slog.Int("png_bytes", len(buf)),
+		)
+		if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			buf, err = page.CaptureScreenshot().WithFormat(page.CaptureScreenshotFormatJpeg).WithQuality(80).Do(ctx)
+			return err
+		})); err != nil {
+			return "", fmt.Errorf("browser: jpeg screenshot failed: %w", err)
+		}
+		mediaType = "image/jpeg"
+		ext = ".jpg"
 	}
 
 	dir := filepath.Join(t.DataDir, "screenshots", sessionID)
@@ -277,7 +302,7 @@ func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID st
 		return "", fmt.Errorf("browser: creating screenshot dir: %w", err)
 	}
 
-	filename := fmt.Sprintf("%d.png", time.Now().UnixMilli())
+	filename := fmt.Sprintf("%d%s", time.Now().UnixMilli(), ext)
 	path := filepath.Join(dir, filename)
 	if err := os.WriteFile(path, buf, 0600); err != nil {
 		return "", fmt.Errorf("browser: writing screenshot: %w", err)
@@ -285,7 +310,7 @@ func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID st
 
 	t.mu.Lock()
 	t.pendingImages[sessionID] = append(t.pendingImages[sessionID], llm.ImageContent{
-		MediaType: "image/png",
+		MediaType: mediaType,
 		Path:      path,
 	})
 	t.pendingImages[sessionID][len(t.pendingImages[sessionID])-1].SetData(buf)
