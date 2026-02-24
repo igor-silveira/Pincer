@@ -31,6 +31,7 @@ func init() {
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(auditCmd)
+	rootCmd.AddCommand(initCmd)
 }
 
 var versionCmd = &cobra.Command{

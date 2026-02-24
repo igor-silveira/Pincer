@@ -197,3 +197,16 @@ func DefaultConfigPath() string {
 func EnsureDataDir() error {
 	return os.MkdirAll(DataDir(), 0700)
 }
+
+func Save(cfg *Config, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("creating config file: %w", err)
+	}
+	defer f.Close()
+
+	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+		return fmt.Errorf("encoding config: %w", err)
+	}
+	return nil
+}
