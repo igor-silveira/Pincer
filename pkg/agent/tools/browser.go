@@ -659,8 +659,8 @@ func (t *BrowserTool) auditLog(ctx context.Context, eventType, sessionID, detail
 	}
 }
 
-const defaultActionTimeout = 30 * time.Second
-const navigationTimeout = 60 * time.Second
+const defaultActionTimeout = 90 * time.Second
+const navigationTimeout = 3 * time.Minute
 
 func (t *BrowserTool) runWithTimeout(browserCtx context.Context, timeout time.Duration, actions ...chromedp.Action) error {
 	ctx, cancel := context.WithTimeout(browserCtx, timeout)
