@@ -271,6 +271,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 		browserTool := &tools.BrowserTool{
+			BaseCtx:     ctx,
 			DataDir:     config.DataDir(),
 			Headless:    cfg.Browser.Headless,
 			IdleTimeout: idleTimeout,
@@ -296,6 +297,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		router.Start(ctx)
 
 		registry.Register(&tools.NotifyTool{
+			BaseCtx:       ctx,
 			RunAndDeliver: router.RunAndDeliver,
 			Send:          router.SendToSession,
 			AuditLog:      router.AuditLog,

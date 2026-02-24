@@ -11,6 +11,7 @@ import (
 )
 
 type NotifyTool struct {
+	BaseCtx       context.Context
 	RunAndDeliver func(ctx context.Context, sessionID, prompt string)
 	Send          func(ctx context.Context, sessionID, content string) error
 	AuditLog      func(ctx context.Context, eventType, sessionID, detail string)
@@ -77,8 +78,12 @@ func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 
 		sid := sessionID
 		prompt := params.Message
+		baseCtx := t.BaseCtx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
 		time.AfterFunc(delay, func() {
-			t.RunAndDeliver(context.Background(), sid, prompt)
+			t.RunAndDeliver(baseCtx, sid, prompt)
 		})
 
 		t.auditLog(ctx, "notify_schedule", sid, fmt.Sprintf("delay=%s prompt=%s", delay, params.Message))

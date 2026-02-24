@@ -184,7 +184,7 @@ func TestSanitizeToolPairs_MixedSequence(t *testing.T) {
 }
 
 func TestSelectHistory_Empty(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	got := cb.selectHistory(nil, 1000)
 	if got == nil {
 		t.Fatal("expected non-nil slice")
@@ -195,7 +195,7 @@ func TestSelectHistory_Empty(t *testing.T) {
 }
 
 func TestSelectHistory_BudgetZero(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	history := []store.Message{
 		{Role: llm.RoleUser, Content: "hi"},
 	}
@@ -209,7 +209,7 @@ func TestSelectHistory_BudgetZero(t *testing.T) {
 }
 
 func TestSelectHistory_FitsAll(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	history := []store.Message{
 		{Role: llm.RoleUser, Content: "a"},
 		{Role: llm.RoleAssistant, Content: "b"},
@@ -225,7 +225,7 @@ func TestSelectHistory_FitsAll(t *testing.T) {
 }
 
 func TestSelectHistory_BudgetExhausted(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	history := []store.Message{
 		{Role: llm.RoleUser, Content: "aaaa"},
 		{Role: llm.RoleAssistant, Content: "bbbb"},
@@ -241,7 +241,7 @@ func TestSelectHistory_BudgetExhausted(t *testing.T) {
 }
 
 func TestContextBuilder_Build_EmptyInputs(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	prompt, msgs := cb.Build(nil, nil, "system prompt")
 	if prompt != "system prompt" {
 		t.Errorf("prompt = %q, want %q", prompt, "system prompt")
@@ -252,7 +252,7 @@ func TestContextBuilder_Build_EmptyInputs(t *testing.T) {
 }
 
 func TestContextBuilder_Build_WithHistory(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	history := []store.Message{
 		{Role: llm.RoleUser, Content: "hello"},
 		{Role: llm.RoleAssistant, Content: "hi"},
@@ -264,7 +264,7 @@ func TestContextBuilder_Build_WithHistory(t *testing.T) {
 }
 
 func TestContextBuilder_Build_HashCaching(t *testing.T) {
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	wsFiles := []WorkspaceFile{
 		{Key: "test", Content: "same content"},
 	}
@@ -346,7 +346,7 @@ func TestSelectHistory_ImageTokenBudget(t *testing.T) {
 		{Role: llm.RoleUser, ContentType: store.ContentTypeToolResults, Content: string(trData)},
 	}
 
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 
 	msgs := cb.selectHistory(history, 100000)
 	if len(msgs) == 0 {
@@ -387,7 +387,7 @@ func TestSelectHistory_StripsImagesFromOldMessages(t *testing.T) {
 		history = append(history, makeToolCallMsg(id), makeToolResultMsg(id))
 	}
 
-	cb := NewContextBuilder(100000)
+	cb := NewContextBuilder(100000, 4096)
 	msgs := cb.selectHistory(history, 100000)
 
 	resultMsgCount := 0

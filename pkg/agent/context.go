@@ -11,10 +11,11 @@ import (
 )
 
 type ContextBuilder struct {
-	mu           sync.RWMutex
-	staticHash   map[string]string
-	cachedTokens map[string]int
-	budget       int
+	mu              sync.RWMutex
+	staticHash      map[string]string
+	cachedTokens    map[string]int
+	budget          int
+	outputReserve   int
 }
 
 type WorkspaceFile struct {
@@ -22,14 +23,18 @@ type WorkspaceFile struct {
 	Content string
 }
 
-func NewContextBuilder(budget int) *ContextBuilder {
+func NewContextBuilder(budget, outputReserve int) *ContextBuilder {
 	if budget <= 0 {
 		budget = 128000
 	}
+	if outputReserve <= 0 {
+		outputReserve = 4096
+	}
 	return &ContextBuilder{
-		staticHash:   make(map[string]string),
-		cachedTokens: make(map[string]int),
-		budget:       budget,
+		staticHash:    make(map[string]string),
+		cachedTokens:  make(map[string]int),
+		budget:        budget,
+		outputReserve: outputReserve,
 	}
 }
 
@@ -67,7 +72,7 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 
 	remaining := cb.budget - usedTokens
 
-	remaining -= 4096
+	remaining -= cb.outputReserve
 
 	messages := cb.selectHistory(history, remaining)
 

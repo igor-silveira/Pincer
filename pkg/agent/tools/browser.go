@@ -22,6 +22,7 @@ type ImageProducer interface {
 }
 
 type BrowserTool struct {
+	BaseCtx     context.Context
 	DataDir     string
 	Headless    bool
 	IdleTimeout time.Duration
@@ -219,6 +220,14 @@ func (t *BrowserTool) cleanIdleSessions(timeout time.Duration) {
 			sess.ctxCancel()
 			sess.allocCancel()
 			delete(t.sessions, id)
+
+			ssDir := filepath.Join(t.DataDir, "screenshots", id)
+			if err := os.RemoveAll(ssDir); err != nil {
+				slog.Debug("failed to remove screenshot dir",
+					slog.String("session_id", id),
+					slog.String("err", err.Error()),
+				)
+			}
 		}
 	}
 }
@@ -246,7 +255,11 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 		chromedp.WindowSize(1280, 720),
 	)
 
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	baseCtx := t.BaseCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	allocCtx, allocCancel := chromedp.NewExecAllocator(baseCtx, opts...)
 	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
 
 	if err := chromedp.Run(taskCtx); err != nil {
@@ -308,12 +321,14 @@ func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID st
 		return "", fmt.Errorf("browser: writing screenshot: %w", err)
 	}
 
-	t.mu.Lock()
-	t.pendingImages[sessionID] = append(t.pendingImages[sessionID], llm.ImageContent{
+	img := llm.ImageContent{
 		MediaType: mediaType,
 		Path:      path,
-	})
-	t.pendingImages[sessionID][len(t.pendingImages[sessionID])-1].SetData(buf)
+	}
+	img.SetData(buf)
+
+	t.mu.Lock()
+	t.pendingImages[sessionID] = append(t.pendingImages[sessionID], img)
 	t.mu.Unlock()
 
 	slog.Debug("browser screenshot captured",
