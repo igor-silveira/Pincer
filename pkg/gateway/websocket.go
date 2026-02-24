@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
-	"github.com/google/uuid"
-	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/google/uuid"
+	"github.com/igorsilveira/pincer/pkg/agent"
 )
 
 type wsIncoming struct {
@@ -49,7 +50,14 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	g.logger.Info("webchat client connected", slog.String("session_id", sessionID))
 
-	_ = wsjson.Write(ctx, conn, wsOutgoing{
+	var writeMu sync.Mutex
+	wsWrite := func(msg wsOutgoing) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = wsjson.Write(ctx, conn, msg)
+	}
+
+	wsWrite(wsOutgoing{
 		Type:      "session",
 		SessionID: sessionID,
 	})
@@ -61,7 +69,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
+				wsWrite(wsOutgoing{
 					Type:      "message",
 					SessionID: sessionID,
 					Content:   msg,
@@ -86,7 +94,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		var incoming wsIncoming
 		if err := json.Unmarshal(data, &incoming); err != nil {
-			_ = wsjson.Write(ctx, conn, wsOutgoing{
+			wsWrite(wsOutgoing{
 				Type:  "error",
 				Error: "invalid message format",
 			})
@@ -110,58 +118,60 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		events, err := g.runtime.RunTurn(ctx, sessionID, incoming.Content)
 		if err != nil {
 			g.logger.Error("agent turn failed", slog.String("err", err.Error()))
-			_ = wsjson.Write(ctx, conn, wsOutgoing{
+			wsWrite(wsOutgoing{
 				Type:  "error",
 				Error: "failed to process message",
 			})
 			continue
 		}
 
-		for ev := range events {
-			switch ev.Type {
-			case agent.TurnToken:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "token",
-					SessionID: sessionID,
-					Content:   ev.Token,
-				})
-			case agent.TurnToolCall:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "tool_call",
-					SessionID: sessionID,
-					ToolName:  ev.ToolCall.Name,
-					ToolInput: string(ev.ToolCall.Input),
-				})
-			case agent.TurnToolResult:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "tool_result",
-					SessionID: sessionID,
-				})
-			case agent.TurnApprovalNeeded:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "approval_request",
-					SessionID: sessionID,
-					RequestID: ev.ApprovalRequest.ID,
-					ToolName:  ev.ApprovalRequest.ToolName,
-					ToolInput: ev.ApprovalRequest.Input,
-				})
-			case agent.TurnProgress:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "progress",
-					SessionID: sessionID,
-					Content:   ev.Message,
-				})
-			case agent.TurnDone:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:      "done",
-					SessionID: sessionID,
-				})
-			case agent.TurnError:
-				_ = wsjson.Write(ctx, conn, wsOutgoing{
-					Type:  "error",
-					Error: ev.Error.Error(),
-				})
+		go func() {
+			for ev := range events {
+				switch ev.Type {
+				case agent.TurnToken:
+					wsWrite(wsOutgoing{
+						Type:      "token",
+						SessionID: sessionID,
+						Content:   ev.Token,
+					})
+				case agent.TurnToolCall:
+					wsWrite(wsOutgoing{
+						Type:      "tool_call",
+						SessionID: sessionID,
+						ToolName:  ev.ToolCall.Name,
+						ToolInput: string(ev.ToolCall.Input),
+					})
+				case agent.TurnToolResult:
+					wsWrite(wsOutgoing{
+						Type:      "tool_result",
+						SessionID: sessionID,
+					})
+				case agent.TurnApprovalNeeded:
+					wsWrite(wsOutgoing{
+						Type:      "approval_request",
+						SessionID: sessionID,
+						RequestID: ev.ApprovalRequest.ID,
+						ToolName:  ev.ApprovalRequest.ToolName,
+						ToolInput: ev.ApprovalRequest.Input,
+					})
+				case agent.TurnProgress:
+					wsWrite(wsOutgoing{
+						Type:      "progress",
+						SessionID: sessionID,
+						Content:   ev.Message,
+					})
+				case agent.TurnDone:
+					wsWrite(wsOutgoing{
+						Type:      "done",
+						SessionID: sessionID,
+					})
+				case agent.TurnError:
+					wsWrite(wsOutgoing{
+						Type:  "error",
+						Error: ev.Error.Error(),
+					})
+				}
 			}
-		}
+		}()
 	}
 }
