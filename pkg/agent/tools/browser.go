@@ -343,7 +343,7 @@ func (t *BrowserTool) doNavigate(ctx context.Context, sessionID string, params b
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx, chromedp.Navigate(params.URL)); err != nil {
+	if err := t.runWithTimeout(browserCtx, navigationTimeout, chromedp.Navigate(params.URL)); err != nil {
 		return "", fmt.Errorf("browser: navigate failed: %w", err)
 	}
 
@@ -364,7 +364,7 @@ func (t *BrowserTool) doClick(ctx context.Context, sessionID string, params brow
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.WaitVisible(params.Selector, chromedp.ByQuery),
 		chromedp.Click(params.Selector, chromedp.ByQuery),
 	); err != nil {
@@ -391,7 +391,7 @@ func (t *BrowserTool) doType(_ context.Context, sessionID string, params browser
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.WaitVisible(params.Selector, chromedp.ByQuery),
 		chromedp.Clear(params.Selector, chromedp.ByQuery),
 		chromedp.SendKeys(params.Selector, params.Text, chromedp.ByQuery),
@@ -429,7 +429,7 @@ func (t *BrowserTool) doGetText(_ context.Context, sessionID string, params brow
 		sel = "body"
 	}
 
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.Text(sel, &text, chromedp.ByQuery),
 	); err != nil {
 		return "", fmt.Errorf("browser: get_text failed: %w", err)
@@ -455,7 +455,7 @@ func (t *BrowserTool) doGetHTML(_ context.Context, sessionID string, params brow
 		sel = "html"
 	}
 
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.OuterHTML(sel, &html, chromedp.ByQuery),
 	); err != nil {
 		return "", fmt.Errorf("browser: get_html failed: %w", err)
@@ -479,7 +479,7 @@ func (t *BrowserTool) doWait(_ context.Context, sessionID string, params browser
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.WaitVisible(params.Selector, chromedp.ByQuery),
 	); err != nil {
 		return "", fmt.Errorf("browser: wait failed: %w", err)
@@ -499,7 +499,7 @@ func (t *BrowserTool) doEvaluate(_ context.Context, sessionID string, params bro
 	}
 
 	var result interface{}
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.Evaluate(params.Script, &result),
 	); err != nil {
 		return "", fmt.Errorf("browser: evaluate failed: %w", err)
@@ -521,7 +521,7 @@ func (t *BrowserTool) doScroll(_ context.Context, sessionID string, params brows
 	}
 
 	script := fmt.Sprintf("window.scrollBy(0, %d)", delta)
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.Evaluate(script, nil),
 		chromedp.Sleep(300*time.Millisecond),
 	); err != nil {
@@ -564,7 +564,7 @@ func (t *BrowserTool) doSelect(_ context.Context, sessionID string, params brows
 	})()`, params.Selector, params.Text, params.Text)
 
 	var result string
-	if err := chromedp.Run(browserCtx,
+	if err := t.runWithTimeout(browserCtx, defaultActionTimeout,
 		chromedp.Evaluate(script, &result),
 	); err != nil {
 		return "", fmt.Errorf("browser: select failed: %w", err)
@@ -584,7 +584,7 @@ func (t *BrowserTool) doBack(_ context.Context, sessionID string) (string, error
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx, chromedp.NavigateBack()); err != nil {
+	if err := t.runWithTimeout(browserCtx, navigationTimeout, chromedp.NavigateBack()); err != nil {
 		return "", fmt.Errorf("browser: back failed: %w", err)
 	}
 
@@ -601,7 +601,7 @@ func (t *BrowserTool) doForward(_ context.Context, sessionID string) (string, er
 		return "", err
 	}
 
-	if err := chromedp.Run(browserCtx, chromedp.NavigateForward()); err != nil {
+	if err := t.runWithTimeout(browserCtx, navigationTimeout, chromedp.NavigateForward()); err != nil {
 		return "", fmt.Errorf("browser: forward failed: %w", err)
 	}
 
@@ -634,6 +634,15 @@ func (t *BrowserTool) auditLog(ctx context.Context, eventType, sessionID, detail
 	if t.AuditLog != nil {
 		t.AuditLog(ctx, eventType, sessionID, detail)
 	}
+}
+
+const defaultActionTimeout = 30 * time.Second
+const navigationTimeout = 60 * time.Second
+
+func (t *BrowserTool) runWithTimeout(browserCtx context.Context, timeout time.Duration, actions ...chromedp.Action) error {
+	ctx, cancel := context.WithTimeout(browserCtx, timeout)
+	defer cancel()
+	return chromedp.Run(ctx, actions...)
 }
 
 func abs(n int) int {
