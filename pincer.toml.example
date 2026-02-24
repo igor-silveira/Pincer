@@ -9,6 +9,7 @@ model = "claude-sonnet-4-20250514"
 # base_url = ""
 # fallback_models = ["gpt-4o", "gemini-2.0-flash"]
 max_context_tokens = 128000
+max_tool_iterations = 25
 tool_approval = "ask"
 # system_prompt = ""
 
@@ -16,6 +17,8 @@ tool_approval = "ask"
 mode = "process"
 network_policy = "deny"
 max_timeout = "5m"
+# allowed_paths = []
+# read_only_paths = []
 
 [memory]
 immutable_keys = ["identity", "core_values"]
@@ -37,6 +40,8 @@ enabled = true
 name = "playwright"
 command = "npx"
 args = ["@playwright/mcp@latest"]
+# env = { KEY = "value" }
+# enabled = true
 
 [tracing]
 # enabled = false
@@ -74,3 +79,8 @@ token_env = "TELEGRAM_BOT_TOKEN"
 #
 # [channels.webchat]
 # enabled = true
+
+[a2a]
+# enabled = false
+# auth_token = ""
+# external_url = ""
