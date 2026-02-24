@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -70,6 +71,14 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 
 	messages := cb.selectHistory(history, remaining)
 
+	slog.Debug("context build completed",
+		slog.Int("workspace_files", len(workspaceFiles)),
+		slog.Int("history_messages", len(history)),
+		slog.Int("selected_messages", len(messages)),
+		slog.Int("budget", cb.budget),
+		slog.Int("remaining_budget", remaining),
+	)
+
 	return finalPrompt, messages
 }
 
@@ -79,6 +88,10 @@ const maxRecentImageMessages = 3
 
 func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []llm.ChatMessage {
 	if budget <= 0 || len(history) == 0 {
+		slog.Debug("context selection skipped",
+			slog.Int("budget", budget),
+			slog.Int("history_len", len(history)),
+		)
 		return []llm.ChatMessage{}
 	}
 
@@ -107,12 +120,22 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 			resolveImageData(chatMsg.ToolResults)
 			imageResultsSeen++
 		} else if len(chatMsg.ToolResults) > 0 {
+			slog.Debug("stripping images from old tool result",
+				slog.Int("message_index", i),
+				slog.Int("images_seen", imageResultsSeen),
+			)
 			for j := range chatMsg.ToolResults {
 				chatMsg.ToolResults[j].Images = nil
 			}
 		}
 
 		if usedTokens+tokens > budget {
+			slog.Debug("context budget exhausted",
+				slog.Int("used_tokens", usedTokens),
+				slog.Int("budget", budget),
+				slog.Int("messages_selected", len(selected)),
+				slog.Int("messages_remaining", i+1),
+			)
 			break
 		}
 

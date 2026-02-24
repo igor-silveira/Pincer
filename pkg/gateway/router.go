@@ -82,6 +82,7 @@ func (cr *ChannelRouter) listenAdapter(ctx context.Context, adapter channels.Ada
 }
 
 func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Adapter, msg channels.InboundMessage) {
+	start := time.Now()
 	logger := telemetry.FromContext(ctx)
 
 	logger.Info("routing message",
@@ -99,6 +100,8 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 	events, err := cr.runtime.RunTurn(ctx, msg.SessionID, msg.Content)
 	if err != nil {
 		stopTyping()
+		telemetry.Metrics.RequestsTotal.WithLabelValues(msg.ChannelName, "error").Inc()
+		telemetry.Metrics.RequestDuration.WithLabelValues(msg.ChannelName).Observe(time.Since(start).Seconds())
 		logger.Error("agent turn failed",
 			slog.String("channel", msg.ChannelName),
 			slog.String("err", err.Error()),
@@ -110,6 +113,10 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		"Sorry, I encountered an error processing your message.")
 
 	stopTyping()
+
+	elapsed := time.Since(start)
+	telemetry.Metrics.RequestsTotal.WithLabelValues(msg.ChannelName, "ok").Inc()
+	telemetry.Metrics.RequestDuration.WithLabelValues(msg.ChannelName).Observe(elapsed.Seconds())
 
 	if fullResponse == "" {
 		return

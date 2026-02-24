@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,19 @@ func (t *BrowserTool) Execute(ctx context.Context, input json.RawMessage, _ sand
 		return "", fmt.Errorf("browser: no session in context")
 	}
 
+	slog.Debug("browser action started",
+		slog.String("action", params.Action),
+		slog.String("session_id", sessionID),
+	)
+	actionStart := time.Now()
+	defer func() {
+		slog.Info("browser action completed",
+			slog.String("action", params.Action),
+			slog.String("session_id", sessionID),
+			slog.Duration("duration", time.Since(actionStart)),
+		)
+	}()
+
 	switch params.Action {
 	case "navigate":
 		return t.doNavigate(ctx, sessionID, params)
@@ -181,6 +195,8 @@ func (t *BrowserTool) Close() {
 		t.cleanupDone = nil
 	}
 
+	slog.Info("browser closing all sessions", slog.Int("count", len(t.sessions)))
+
 	for id, sess := range t.sessions {
 		sess.ctxCancel()
 		sess.allocCancel()
@@ -195,6 +211,10 @@ func (t *BrowserTool) cleanIdleSessions(timeout time.Duration) {
 	now := time.Now()
 	for id, sess := range t.sessions {
 		if now.Sub(sess.lastUsed) > timeout {
+			slog.Info("browser session evicted (idle)",
+				slog.String("session_id", id),
+				slog.Duration("idle_time", now.Sub(sess.lastUsed)),
+			)
 			sess.ctxCancel()
 			sess.allocCancel()
 			delete(t.sessions, id)
@@ -241,6 +261,8 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 		lastUsed:    time.Now(),
 	}
 
+	slog.Info("browser session created", slog.String("session_id", sessionID))
+
 	return taskCtx, nil
 }
 
@@ -268,6 +290,12 @@ func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID st
 	})
 	t.pendingImages[sessionID][len(t.pendingImages[sessionID])-1].SetData(buf)
 	t.mu.Unlock()
+
+	slog.Debug("browser screenshot captured",
+		slog.String("session_id", sessionID),
+		slog.String("path", path),
+		slog.Int("size_bytes", len(buf)),
+	)
 
 	return path, nil
 }

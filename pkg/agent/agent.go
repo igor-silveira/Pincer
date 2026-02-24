@@ -200,6 +200,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			toolDefs = r.registry.Definitions()
 		}
 
+		llmStart := time.Now()
 		events, err := r.provider.Chat(ctx, llm.ChatRequest{
 			Model:     r.model,
 			System:    systemPrompt,
@@ -209,6 +210,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			Tools:     toolDefs,
 		})
 		if err != nil {
+			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("calling LLM: %w", err)}
 			return
 		}
@@ -231,11 +233,25 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				usage = ev.Usage
 
 			case llm.EventError:
+				telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
 				logger.Error("llm stream error", slog.String("err", ev.Error.Error()))
 				out <- TurnEvent{Type: TurnError, Error: ev.Error}
 				return
 			}
 		}
+
+		llmElapsed := time.Since(llmStart)
+		telemetry.Metrics.LLMRequestsTotal.WithLabelValues("default", r.model).Inc()
+		telemetry.Metrics.LLMLatency.WithLabelValues("default", r.model).Observe(llmElapsed.Seconds())
+		if usage != nil {
+			telemetry.Metrics.TokensUsed.WithLabelValues("input", r.model).Add(float64(usage.InputTokens))
+			telemetry.Metrics.TokensUsed.WithLabelValues("output", r.model).Add(float64(usage.OutputTokens))
+		}
+		logger.Info("llm turn completed",
+			slog.Duration("duration", llmElapsed),
+			slog.Int("tool_calls", len(toolCalls)),
+			slog.Int("text_len", len(textContent)),
+		)
 
 		if len(toolCalls) == 0 {
 			r.persistAssistantMessage(ctx, logger, sessionID, string(textContent), usage)
@@ -337,10 +353,18 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		policy.RequireApproval = false
 	}
 
+	start := time.Now()
 	output, err := tool.Execute(ctx, tc.Input, r.sandbox, policy)
+	elapsed := time.Since(start)
+
+	telemetry.Metrics.ToolDuration.WithLabelValues(tc.Name).Observe(elapsed.Seconds())
+
 	if err != nil {
+		telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "error").Inc()
+		telemetry.Metrics.ErrorsTotal.WithLabelValues("tool").Inc()
 		logger.Error("tool execution failed",
 			slog.String("tool", tc.Name),
+			slog.Duration("duration", elapsed),
 			slog.String("err", err.Error()),
 		)
 		r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name,
@@ -351,6 +375,13 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 			IsError:    true,
 		}
 	}
+
+	telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "ok").Inc()
+	logger.Info("tool execution completed",
+		slog.String("tool", tc.Name),
+		slog.Duration("duration", elapsed),
+		slog.Int("output_len", len(output)),
+	)
 
 	r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
 
@@ -443,6 +474,7 @@ func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*st
 	if err := r.store.CreateSession(ctx, sess); err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
 	}
+	telemetry.Metrics.ActiveSessions.Inc()
 	r.auditLog(ctx, audit.EventSessionNew, sessionID, "system",
 		fmt.Sprintf("channel=%s peer=%s", sess.Channel, sess.PeerID))
 	return sess, nil
@@ -607,10 +639,18 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 	}
 	policy.RequireApproval = false
 
+	start := time.Now()
 	output, err := tool.Execute(ctx, tc.Input, sb, policy)
+	elapsed := time.Since(start)
+
+	telemetry.Metrics.ToolDuration.WithLabelValues(tc.Name).Observe(elapsed.Seconds())
+
 	if err != nil {
+		telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "error").Inc()
+		telemetry.Metrics.ErrorsTotal.WithLabelValues("tool").Inc()
 		logger.Error("subagent tool execution failed",
 			slog.String("tool", tc.Name),
+			slog.Duration("duration", elapsed),
 			slog.String("err", err.Error()),
 		)
 		return llm.ToolResult{
@@ -619,6 +659,13 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 			IsError:    true,
 		}
 	}
+
+	telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "ok").Inc()
+	logger.Info("subagent tool execution completed",
+		slog.String("tool", tc.Name),
+		slog.Duration("duration", elapsed),
+		slog.Int("output_len", len(output)),
+	)
 
 	result := llm.ToolResult{
 		ToolCallID: tc.ID,

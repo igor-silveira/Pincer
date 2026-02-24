@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/telemetry"
 )
 
 type wsIncoming struct {
@@ -40,6 +41,9 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.CloseNow() }()
+
+	telemetry.Metrics.ActiveConnections.Inc()
+	defer telemetry.Metrics.ActiveConnections.Dec()
 
 	sessionID := uuid.NewString()
 	client := g.chat.RegisterClient(sessionID)
