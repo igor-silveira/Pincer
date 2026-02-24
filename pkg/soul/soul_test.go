@@ -93,6 +93,23 @@ func TestLoad_NonExistent(t *testing.T) {
 	}
 }
 
+func TestRender_ContainsOperationalGuidelines(t *testing.T) {
+	s := Default()
+	output := s.Render()
+	checks := []string{
+		"Operational Guidelines",
+		"Task Execution",
+		"Tool Selection",
+		"Error Recovery",
+		"Context Awareness",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("Render() should contain %q", check)
+		}
+	}
+}
+
 func TestSeedMemory(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
 	if err != nil {

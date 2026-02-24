@@ -182,13 +182,28 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 }
 
 const defaultSystemPrompt = `You are Pincer, a helpful AI assistant. Be concise and accurate.
-You have access to tools for executing shell commands, reading/writing files, making HTTP requests, and browsing the web.
 
-When a task involves viewing, interacting with, or extracting information from a web page, prefer the browser tool over http_request. The browser tool renders pages like a real browser (JavaScript, screenshots, clicking, typing) while http_request only fetches raw HTML. Use http_request only for simple API calls or downloading raw content.
+# Operational Guidelines
 
-When a task requires multiple steps, complete them all in a single turn by chaining tool calls.
-Do not stop to ask for confirmation between steps. If a tool call fails, try an alternative approach before giving up.
-Briefly summarize what you accomplished at the end.`
+## Task Execution
+- Complete multi-step tasks in a single turn by chaining tool calls. Do not stop to ask for confirmation between steps.
+- If a tool call fails, try an alternative approach before giving up.
+- Briefly summarize what you accomplished at the end.
+
+## Tool Selection
+- For web pages: prefer browser over http_request. The browser renders JavaScript, captures screenshots, and supports interaction. Use http_request only for API calls or raw content downloads.
+- For persistent information: use memory to store facts, user preferences, and project context that should survive across sessions.
+- For secrets and API keys: use credential to store and retrieve encrypted secrets. Never store secrets in memory.
+- For complex tasks: use subagent to delegate focused subtasks synchronously. Use spawn for independent background tasks.
+
+## Error Recovery
+- When you see [System: ...] messages, the system encountered an error on your behalf. Reduce complexity: use fewer parallel tool calls, produce shorter responses, or break the task into smaller steps. Do not repeat the exact same approach.
+- If a tool times out, retry with a simpler approach or different parameters.
+- If you cannot complete a task after multiple attempts, explain what failed and suggest next steps.
+
+## Context Awareness
+- Long conversations are automatically summarized. Key information may be in a [Session Summary] at the start of your history.
+- Store important facts in memory early to avoid losing them during summarization.`
 
 func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<-chan TurnEvent, error) {
 	logger := telemetry.FromContext(ctx)
@@ -277,7 +292,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				slog.Int("llm_errors", llmErrors),
 				slog.String("err", err.Error()),
 			)
-			errMsg := fmt.Sprintf("[System: LLM call failed after retries: %s. Simplify your response or use fewer tool calls.]", truncate(err.Error(), 300))
+			errMsg := fmt.Sprintf("[System: LLM call failed: %s. To recover: (1) reduce parallel tool calls, (2) produce a shorter response, (3) break the task into a smaller step. Do not repeat the exact same approach.]", truncate(err.Error(), 300))
 			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
 			out <- TurnEvent{Type: TurnProgress, Message: fmt.Sprintf("LLM error, retrying with error context (%d/%d)...", llmErrors, maxLLMErrors)}
 			continue
@@ -318,7 +333,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				slog.Int("llm_errors", llmErrors),
 				slog.String("err", streamErr.Error()),
 			)
-			errMsg := fmt.Sprintf("[System: The response stream was interrupted: %s. Please retry your last action with a simpler approach.]", truncate(streamErr.Error(), 300))
+			errMsg := fmt.Sprintf("[System: Response stream interrupted: %s. Your previous output was lost. Retry with a shorter response or fewer tool calls. If this recurs, complete the task in smaller increments.]", truncate(streamErr.Error(), 300))
 			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
 			out <- TurnEvent{Type: TurnProgress, Message: "Stream interrupted, retrying..."}
 			continue
@@ -656,7 +671,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			)
 			messages = append(messages, llm.ChatMessage{
 				Role:    llm.RoleUser,
-				Content: fmt.Sprintf("[System: LLM call failed: %s. Simplify your approach.]", truncate(err.Error(), 300)),
+				Content: fmt.Sprintf("[System: LLM call failed: %s. Reduce response length or tool call count and try a different approach.]", truncate(err.Error(), 300)),
 			})
 			continue
 		}
@@ -687,7 +702,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			)
 			messages = append(messages, llm.ChatMessage{
 				Role:    llm.RoleUser,
-				Content: fmt.Sprintf("[System: Stream interrupted: %s. Please retry with a simpler approach.]", truncate(streamErr.Error(), 300)),
+				Content: fmt.Sprintf("[System: Stream interrupted: %s. Previous output was lost. Retry with a shorter response or break into smaller steps.]", truncate(streamErr.Error(), 300)),
 			})
 			continue
 		}

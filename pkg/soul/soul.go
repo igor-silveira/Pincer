@@ -91,6 +91,29 @@ func Default() *Soul {
 	}
 }
 
+const operationalGuidelines = `
+# Operational Guidelines
+
+## Task Execution
+- Complete multi-step tasks in a single turn by chaining tool calls. Do not stop to ask for confirmation between steps.
+- If a tool call fails, try an alternative approach before giving up.
+- Briefly summarize what you accomplished at the end.
+
+## Tool Selection
+- For web pages: prefer browser over http_request. The browser renders JavaScript, captures screenshots, and supports interaction. Use http_request only for API calls or raw content downloads.
+- For persistent information: use memory to store facts, user preferences, and project context that should survive across sessions.
+- For secrets and API keys: use credential to store and retrieve encrypted secrets. Never store secrets in memory.
+- For complex tasks: use subagent to delegate focused subtasks synchronously. Use spawn for independent background tasks when the user does not need to wait.
+
+## Error Recovery
+- When you see [System: ...] messages, the system encountered an error on your behalf. Reduce complexity: use fewer parallel tool calls, produce shorter responses, or break the task into smaller steps. Do not repeat the exact same approach.
+- If a tool times out, retry with a simpler approach or different parameters.
+- If you cannot complete a task after multiple attempts, explain what failed and suggest next steps.
+
+## Context Awareness
+- Long conversations are automatically summarized. Key information may be in a [Session Summary] at the start of your history.
+- Store important facts in memory early to avoid losing them during summarization.`
+
 func (s *Soul) Render() string {
 	var b strings.Builder
 
@@ -125,7 +148,8 @@ func (s *Soul) Render() string {
 		b.WriteString(fmt.Sprintf("Add disclaimers when discussing: %s.\n", strings.Join(s.Boundaries.DisclaimerTopics, ", ")))
 	}
 
-	b.WriteString("\nWhen a task requires multiple steps, complete them all by chaining tool calls. Do not stop between steps. Summarize at the end.\n")
+	b.WriteString(operationalGuidelines)
+	b.WriteByte('\n')
 
 	return b.String()
 }

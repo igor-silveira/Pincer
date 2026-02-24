@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,9 +20,21 @@ const (
 	summaryMaxTokens    = 1024
 )
 
-const compactionPrompt = `Summarize the following conversation history into a concise summary.
-Focus on: key facts discussed, decisions made, user preferences revealed, and any pending tasks.
-Be specific and factual. Use bullet points. Keep it under 500 words.
+const compactionPrompt = `Summarize this conversation history for use as context in future turns.
+
+Preserve:
+- Key facts, decisions, and conclusions reached
+- User preferences, corrections, and explicit requests
+- Outcomes of tool calls (what was created, modified, found, or failed)
+- Names, paths, URLs, and identifiers that were referenced
+- Any pending or incomplete tasks
+
+Omit:
+- Intermediate debugging steps that led nowhere
+- Raw tool output already summarized in conversation
+- Redundant clarifications already resolved
+
+Use bullet points. Be specific and factual. Keep under 500 words.
 
 Conversation:
 %s`
@@ -58,8 +71,42 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 
 	var conv strings.Builder
 	for _, m := range oldMessages {
+		if m.ContentType == store.ContentTypeToolCalls {
+			var data struct {
+				Text      string         `json:"text,omitempty"`
+				ToolCalls []llm.ToolCall `json:"tool_calls"`
+			}
+			if err := json.Unmarshal([]byte(m.Content), &data); err == nil {
+				var names []string
+				for _, tc := range data.ToolCalls {
+					names = append(names, tc.Name)
+				}
+				if data.Text != "" {
+					conv.WriteString(fmt.Sprintf("%s: %s [called: %s]\n", m.Role, truncate(data.Text, 200), strings.Join(names, ", ")))
+				} else {
+					conv.WriteString(fmt.Sprintf("%s: [called: %s]\n", m.Role, strings.Join(names, ", ")))
+				}
+			} else {
+				conv.WriteString(fmt.Sprintf("[%s: tool interaction]\n", m.Role))
+			}
+			continue
+		}
+		if m.ContentType == store.ContentTypeToolResults {
+			var results []llm.ToolResult
+			if err := json.Unmarshal([]byte(m.Content), &results); err == nil {
+				for _, r := range results {
+					status := "ok"
+					if r.IsError {
+						status = "error"
+					}
+					conv.WriteString(fmt.Sprintf("[tool result (%s): %s]\n", status, truncate(r.Content, 150)))
+				}
+			} else {
+				conv.WriteString(fmt.Sprintf("[%s: tool results]\n", m.Role))
+			}
+			continue
+		}
 		if m.ContentType != store.ContentTypeText {
-
 			conv.WriteString(fmt.Sprintf("[%s: %s interaction]\n", m.Role, m.ContentType))
 			continue
 		}
@@ -70,7 +117,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 
 	events, err := r.provider.Chat(ctx, llm.ChatRequest{
 		Model:     r.model,
-		System:    "You are a conversation summarizer. Be concise and factual.",
+		System:    "You are a conversation summarizer for an AI assistant. Produce a structured, factual summary that preserves actionable context. Never fabricate information not present in the conversation.",
 		Messages:  []llm.ChatMessage{{Role: llm.RoleUser, Content: prompt}},
 		MaxTokens: summaryMaxTokens,
 		Stream:    false,
