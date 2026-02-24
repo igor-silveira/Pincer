@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/igorsilveira/pincer/pkg/llm"
@@ -271,5 +273,140 @@ func TestContextBuilder_Build_HashCaching(t *testing.T) {
 
 	if p1 != p2 {
 		t.Errorf("same workspace files should produce same prompt on second call")
+	}
+}
+
+func TestResolveImageData_LoadsFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.png")
+	if err := os.WriteFile(path, []byte("fake png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	img := llm.ImageContent{MediaType: "image/png", Path: path}
+	results := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
+	}
+
+	resolveImageData(results)
+
+	if results[0].Images[0].Data() == nil {
+		t.Fatal("expected image data to be loaded")
+	}
+	if string(results[0].Images[0].Data()) != "fake png" {
+		t.Errorf("data = %q, want %q", string(results[0].Images[0].Data()), "fake png")
+	}
+}
+
+func TestResolveImageData_MissingFile(t *testing.T) {
+	img := llm.ImageContent{MediaType: "image/png", Path: "/nonexistent/path.png"}
+	results := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
+	}
+
+	resolveImageData(results)
+
+	if results[0].Images[0].Data() != nil {
+		t.Error("expected nil data for missing file")
+	}
+}
+
+func TestResolveImageData_AlreadyHasData(t *testing.T) {
+	img := llm.ImageContent{MediaType: "image/png", Path: "/some/path.png"}
+	img.SetData([]byte("existing"))
+	results := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
+	}
+
+	resolveImageData(results)
+
+	if string(results[0].Images[0].Data()) != "existing" {
+		t.Errorf("data should not be overwritten, got %q", string(results[0].Images[0].Data()))
+	}
+}
+
+func TestResolveImageData_EmptyImages(t *testing.T) {
+	results := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "output"},
+	}
+	resolveImageData(results)
+}
+
+func TestSelectHistory_ImageTokenBudget(t *testing.T) {
+	img := llm.ImageContent{MediaType: "image/png", Path: "/nonexistent.png"}
+	toolResults := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "ok", Images: []llm.ImageContent{img}},
+	}
+	trData, _ := json.Marshal(toolResults)
+
+	history := []store.Message{
+		{Role: llm.RoleUser, Content: "hi", ContentType: store.ContentTypeText},
+		{Role: llm.RoleAssistant, Content: "let me check", ContentType: store.ContentTypeText},
+		{Role: llm.RoleAssistant, ContentType: store.ContentTypeToolCalls, Content: `{"tool_calls":[{"id":"tc1","name":"browser","input":{}}]}`},
+		{Role: llm.RoleUser, ContentType: store.ContentTypeToolResults, Content: string(trData)},
+	}
+
+	cb := NewContextBuilder(100000)
+
+	msgs := cb.selectHistory(history, 100000)
+	if len(msgs) == 0 {
+		t.Fatal("expected some messages in history")
+	}
+}
+
+func TestSelectHistory_StripsImagesFromOldMessages(t *testing.T) {
+	img := llm.ImageContent{MediaType: "image/png", Path: "/nonexistent.png"}
+	makeToolResultMsg := func(id string) store.Message {
+		results := []llm.ToolResult{
+			{ToolCallID: id, Content: "ok", Images: []llm.ImageContent{img}},
+		}
+		data, _ := json.Marshal(results)
+		return store.Message{
+			Role:        llm.RoleUser,
+			ContentType: store.ContentTypeToolResults,
+			Content:     string(data),
+		}
+	}
+
+	makeToolCallMsg := func(id string) store.Message {
+		data, _ := json.Marshal(struct {
+			ToolCalls []llm.ToolCall `json:"tool_calls"`
+		}{
+			ToolCalls: []llm.ToolCall{{ID: id, Name: "browser", Input: json.RawMessage(`{}`)}},
+		})
+		return store.Message{
+			Role:        llm.RoleAssistant,
+			ContentType: store.ContentTypeToolCalls,
+			Content:     string(data),
+		}
+	}
+
+	var history []store.Message
+	for i := 0; i < 5; i++ {
+		id := "tc" + string(rune('0'+i))
+		history = append(history, makeToolCallMsg(id), makeToolResultMsg(id))
+	}
+
+	cb := NewContextBuilder(100000)
+	msgs := cb.selectHistory(history, 100000)
+
+	resultMsgCount := 0
+	for _, m := range msgs {
+		if len(m.ToolResults) > 0 {
+			resultMsgCount++
+		}
+	}
+
+	imagesKept := 0
+	for _, m := range msgs {
+		for _, tr := range m.ToolResults {
+			if len(tr.Images) > 0 {
+				imagesKept++
+			}
+		}
+	}
+
+	if imagesKept > maxRecentImageMessages {
+		t.Errorf("kept %d image-bearing results, want at most %d", imagesKept, maxRecentImageMessages)
 	}
 }

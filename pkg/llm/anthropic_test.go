@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -133,5 +134,141 @@ func TestAnthropicChat_StreamResponse(t *testing.T) {
 	joined := strings.Join(tokens, "")
 	if joined != "Hi there" {
 		t.Errorf("tokens = %q, want %q", joined, "Hi there")
+	}
+}
+
+func TestConvertToAnthropicMessage_ToolResultNoImages(t *testing.T) {
+	msg := ChatMessage{
+		Role: RoleUser,
+		ToolResults: []ToolResult{
+			{ToolCallID: "tc1", Content: "output text"},
+		},
+	}
+
+	got := convertToAnthropicMessage(msg)
+	blocks, ok := got.Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("Content type = %T, want []anthropicContentBlock", got.Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks len = %d, want 1", len(blocks))
+	}
+	if blocks[0].Type != "tool_result" {
+		t.Errorf("Type = %q, want %q", blocks[0].Type, "tool_result")
+	}
+	if blocks[0].Content != "output text" {
+		t.Errorf("Content = %v, want %q", blocks[0].Content, "output text")
+	}
+}
+
+func TestConvertToAnthropicMessage_ToolResultWithImages(t *testing.T) {
+	imgData := []byte("fake png data")
+	img := ImageContent{MediaType: "image/png", Path: "/tmp/test.png"}
+	img.SetData(imgData)
+
+	msg := ChatMessage{
+		Role: RoleUser,
+		ToolResults: []ToolResult{
+			{
+				ToolCallID: "tc1",
+				Content:    "screenshot taken",
+				Images:     []ImageContent{img},
+			},
+		},
+	}
+
+	got := convertToAnthropicMessage(msg)
+	blocks, ok := got.Content.([]anthropicContentBlock)
+	if !ok {
+		t.Fatalf("Content type = %T, want []anthropicContentBlock", got.Content)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("blocks len = %d, want 1", len(blocks))
+	}
+
+	innerBlocks, ok := blocks[0].Content.([]anthropicInlineBlock)
+	if !ok {
+		t.Fatalf("inner Content type = %T, want []anthropicInlineBlock", blocks[0].Content)
+	}
+	if len(innerBlocks) != 2 {
+		t.Fatalf("inner blocks len = %d, want 2 (text + image)", len(innerBlocks))
+	}
+
+	if innerBlocks[0].Type != "text" {
+		t.Errorf("inner[0].Type = %q, want %q", innerBlocks[0].Type, "text")
+	}
+	if innerBlocks[0].Text != "screenshot taken" {
+		t.Errorf("inner[0].Text = %q, want %q", innerBlocks[0].Text, "screenshot taken")
+	}
+
+	if innerBlocks[1].Type != "image" {
+		t.Errorf("inner[1].Type = %q, want %q", innerBlocks[1].Type, "image")
+	}
+	if innerBlocks[1].Source == nil {
+		t.Fatal("inner[1].Source should not be nil")
+	}
+	if innerBlocks[1].Source.Type != "base64" {
+		t.Errorf("Source.Type = %q, want %q", innerBlocks[1].Source.Type, "base64")
+	}
+	if innerBlocks[1].Source.MediaType != "image/png" {
+		t.Errorf("Source.MediaType = %q, want %q", innerBlocks[1].Source.MediaType, "image/png")
+	}
+
+	expectedB64 := base64.StdEncoding.EncodeToString(imgData)
+	if innerBlocks[1].Source.Data != expectedB64 {
+		t.Errorf("Source.Data = %q, want %q", innerBlocks[1].Source.Data, expectedB64)
+	}
+}
+
+func TestConvertToAnthropicMessage_ToolResultImageNoData(t *testing.T) {
+	img := ImageContent{MediaType: "image/png", Path: "/tmp/test.png"}
+
+	msg := ChatMessage{
+		Role: RoleUser,
+		ToolResults: []ToolResult{
+			{
+				ToolCallID: "tc1",
+				Content:    "output",
+				Images:     []ImageContent{img},
+			},
+		},
+	}
+
+	got := convertToAnthropicMessage(msg)
+	blocks := got.Content.([]anthropicContentBlock)
+	innerBlocks := blocks[0].Content.([]anthropicInlineBlock)
+
+	if len(innerBlocks) != 1 {
+		t.Fatalf("inner blocks len = %d, want 1 (only text, image skipped without data)", len(innerBlocks))
+	}
+	if innerBlocks[0].Type != "text" {
+		t.Errorf("inner[0].Type = %q, want %q", innerBlocks[0].Type, "text")
+	}
+}
+
+func TestConvertToAnthropicMessage_ToolResultSerializesJSON(t *testing.T) {
+	imgData := []byte("png")
+	img := ImageContent{MediaType: "image/png"}
+	img.SetData(imgData)
+
+	msg := ChatMessage{
+		Role: RoleUser,
+		ToolResults: []ToolResult{
+			{ToolCallID: "tc1", Content: "text", Images: []ImageContent{img}},
+		},
+	}
+
+	apiMsg := convertToAnthropicMessage(msg)
+
+	data, err := json.Marshal(apiMsg)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"type":"image"`) {
+		t.Error("serialized JSON should contain image block")
+	}
+	if !strings.Contains(string(data), `"type":"base64"`) {
+		t.Error("serialized JSON should contain base64 source type")
 	}
 }

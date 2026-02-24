@@ -32,10 +32,20 @@ type ToolCall struct {
 	Input json.RawMessage `json:"input"`
 }
 
+type ImageContent struct {
+	MediaType string `json:"media_type"`
+	Path      string `json:"path,omitempty"`
+	data      []byte
+}
+
+func (ic *ImageContent) Data() []byte     { return ic.data }
+func (ic *ImageContent) SetData(b []byte) { ic.data = b }
+
 type ToolResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Content    string `json:"content"`
-	IsError    bool   `json:"is_error,omitempty"`
+	ToolCallID string         `json:"tool_call_id"`
+	Content    string         `json:"content"`
+	IsError    bool           `json:"is_error,omitempty"`
+	Images     []ImageContent `json:"images,omitempty"`
 }
 
 type ChatMessage struct {

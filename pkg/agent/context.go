@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"os"
 	"sync"
 
 	"github.com/igorsilveira/pincer/pkg/llm"
@@ -72,6 +73,10 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 	return finalPrompt, messages
 }
 
+const imageTokenEstimate = 1600
+
+const maxRecentImageMessages = 3
+
 func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []llm.ChatMessage {
 	if budget <= 0 || len(history) == 0 {
 		return []llm.ChatMessage{}
@@ -85,16 +90,32 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 
 	var selected []indexedMsg
 	usedTokens := 0
+	imageResultsSeen := 0
 
 	for i := len(history) - 1; i >= 0; i-- {
 		m := history[i]
 		tokens := estimateTokens(m.Content)
 
+		chatMsg := messageToLLM(m)
+
+		if len(chatMsg.ToolResults) > 0 && imageResultsSeen < maxRecentImageMessages {
+			for j := range chatMsg.ToolResults {
+				for range chatMsg.ToolResults[j].Images {
+					tokens += imageTokenEstimate
+				}
+			}
+			resolveImageData(chatMsg.ToolResults)
+			imageResultsSeen++
+		} else if len(chatMsg.ToolResults) > 0 {
+			for j := range chatMsg.ToolResults {
+				chatMsg.ToolResults[j].Images = nil
+			}
+		}
+
 		if usedTokens+tokens > budget {
 			break
 		}
 
-		chatMsg := messageToLLM(m)
 		selected = append(selected, indexedMsg{idx: i, msg: chatMsg, tokens: tokens})
 		usedTokens += tokens
 	}
@@ -105,6 +126,20 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 	}
 
 	return sanitizeToolPairs(result)
+}
+
+func resolveImageData(results []llm.ToolResult) {
+	for i := range results {
+		for j := range results[i].Images {
+			img := &results[i].Images[j]
+			if img.Data() == nil && img.Path != "" {
+				data, err := os.ReadFile(img.Path)
+				if err == nil {
+					img.SetData(data)
+				}
+			}
+		}
+	}
 }
 
 func sanitizeToolPairs(msgs []llm.ChatMessage) []llm.ChatMessage {

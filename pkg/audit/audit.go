@@ -36,6 +36,8 @@ const (
 	EventSpawnStart     = "spawn_start"
 	EventSpawnDeliver   = "spawn_deliver"
 	EventSpawnError     = "spawn_error"
+	EventBrowserNav     = "browser_nav"
+	EventBrowserClose   = "browser_close"
 )
 
 type Entry struct {

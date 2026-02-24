@@ -348,10 +348,14 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 
 	r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
 
-	return llm.ToolResult{
+	result := llm.ToolResult{
 		ToolCallID: tc.ID,
 		Content:    output,
 	}
+	if ip, ok := tool.(tools.ImageProducer); ok {
+		result.Images = ip.ConsumeImages(ctx)
+	}
+	return result
 }
 
 func (r *Runtime) persistMessage(ctx context.Context, logger *slog.Logger, sessionID, role, contentType, content string, usage *llm.Usage) {
@@ -610,10 +614,14 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 		}
 	}
 
-	return llm.ToolResult{
+	result := llm.ToolResult{
 		ToolCallID: tc.ID,
 		Content:    output,
 	}
+	if ip, ok := tool.(tools.ImageProducer); ok {
+		result.Images = ip.ConsumeImages(ctx)
+	}
+	return result
 }
 
 func ContentHash(content string) string {

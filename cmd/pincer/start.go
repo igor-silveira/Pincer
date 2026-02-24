@@ -263,6 +263,32 @@ func runStart(cmd *cobra.Command, args []string) error {
 		},
 	})
 
+	if cfg.Browser.Enabled {
+		idleTimeout := 10 * time.Minute
+		if cfg.Browser.IdleTimeout != "" {
+			if d, err := time.ParseDuration(cfg.Browser.IdleTimeout); err == nil {
+				idleTimeout = d
+			}
+		}
+		browserTool := &tools.BrowserTool{
+			DataDir:     config.DataDir(),
+			Headless:    cfg.Browser.Headless,
+			IdleTimeout: idleTimeout,
+			AuditLog: func(ctx context.Context, eventType, sessionID, detail string) {
+				if deps.auditLog != nil {
+					_ = deps.auditLog.Log(ctx, eventType, sessionID, "", "browser", detail)
+				}
+			},
+		}
+		browserTool.StartCleanup()
+		defer browserTool.Close()
+		registry.Register(browserTool)
+		logger.Info("browser tool enabled",
+			slog.Bool("headless", cfg.Browser.Headless),
+			slog.String("idle_timeout", idleTimeout.String()),
+		)
+	}
+
 	channelAdapters := initChannelAdapters(ctx, cfg, logger)
 
 	if len(channelAdapters) > 0 {

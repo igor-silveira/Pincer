@@ -3,6 +3,7 @@ package llm
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,8 +80,20 @@ type anthropicContentBlock struct {
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Content   interface{}     `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+type anthropicInlineBlock struct {
+	Type   string                `json:"type"`
+	Text   string                `json:"text,omitempty"`
+	Source *anthropicImageSource `json:"source,omitempty"`
 }
 
 func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
@@ -148,12 +161,33 @@ func convertToAnthropicMessage(m ChatMessage) anthropicMessage {
 	if m.Role == RoleUser && len(m.ToolResults) > 0 {
 		var blocks []anthropicContentBlock
 		for _, tr := range m.ToolResults {
-			blocks = append(blocks, anthropicContentBlock{
+			block := anthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: tr.ToolCallID,
-				Content:   tr.Content,
 				IsError:   tr.IsError,
-			})
+			}
+			if len(tr.Images) > 0 {
+				var inner []anthropicInlineBlock
+				if tr.Content != "" {
+					inner = append(inner, anthropicInlineBlock{Type: "text", Text: tr.Content})
+				}
+				for _, img := range tr.Images {
+					if img.Data() != nil {
+						inner = append(inner, anthropicInlineBlock{
+							Type: "image",
+							Source: &anthropicImageSource{
+								Type:      "base64",
+								MediaType: img.MediaType,
+								Data:      base64.StdEncoding.EncodeToString(img.Data()),
+							},
+						})
+					}
+				}
+				block.Content = inner
+			} else {
+				block.Content = tr.Content
+			}
+			blocks = append(blocks, block)
 		}
 		return anthropicMessage{Role: m.Role, Content: blocks}
 	}

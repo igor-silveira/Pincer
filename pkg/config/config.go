@@ -23,6 +23,7 @@ type Config struct {
 	Soul        SoulConfig               `toml:"soul"`
 	MCP         MCPConfig                `toml:"mcp"`
 	A2A         A2AConfig                `toml:"a2a"`
+	Browser     BrowserConfig            `toml:"browser"`
 }
 
 type GatewayConfig struct {
@@ -109,6 +110,12 @@ type A2AConfig struct {
 	ExternalURL string `toml:"external_url"`
 }
 
+type BrowserConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	Headless    bool   `toml:"headless"`
+	IdleTimeout string `toml:"idle_timeout"`
+}
+
 func Default() *Config {
 	return &Config{
 		Gateway: GatewayConfig{
@@ -137,6 +144,11 @@ func Default() *Config {
 		Log: LogConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Browser: BrowserConfig{
+			Enabled:     false,
+			Headless:    true,
+			IdleTimeout: "10m",
 		},
 	}
 }
