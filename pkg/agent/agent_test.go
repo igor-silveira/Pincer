@@ -322,8 +322,8 @@ func TestRunTurn_ToolCallDenied(t *testing.T) {
 			hasToolResult = true
 		}
 	}
-	if hasToolResult {
-		t.Error("denied tool call should not produce TurnToolResult")
+	if !hasToolResult {
+		t.Error("denied tool call should still produce TurnToolResult for UI matching")
 	}
 }
 

@@ -249,6 +249,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			result := r.executeTool(ctx, logger, sessionID, tc, out)
 			toolResults = append(toolResults, result)
 			toolNames = append(toolNames, tc.Name)
+			out <- TurnEvent{Type: TurnToolResult}
 		}
 
 		r.persistToolResultMessage(ctx, logger, sessionID, toolResults)
@@ -346,7 +347,6 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 	}
 
 	r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
-	out <- TurnEvent{Type: TurnToolResult}
 
 	return llm.ToolResult{
 		ToolCallID: tc.ID,
