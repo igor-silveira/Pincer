@@ -244,8 +244,16 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 	}
 
 	if sess, ok := t.sessions[sessionID]; ok {
-		sess.lastUsed = time.Now()
-		return sess.ctx, nil
+		if sess.ctx.Err() == nil {
+			sess.lastUsed = time.Now()
+			return sess.ctx, nil
+		}
+		slog.Warn("browser session context done, recreating",
+			slog.String("session_id", sessionID),
+		)
+		sess.ctxCancel()
+		sess.allocCancel()
+		delete(t.sessions, sessionID)
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
