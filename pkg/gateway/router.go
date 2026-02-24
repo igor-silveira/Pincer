@@ -438,6 +438,9 @@ func (cr *ChannelRouter) CheckSpawn(spawnID string) (string, bool, error) {
 	if !sr.Done {
 		return "", false, nil
 	}
+
+	delete(cr.spawnResults, spawnID)
+
 	if sr.Error != "" {
 		return fmt.Sprintf("error: %s", sr.Error), true, nil
 	}

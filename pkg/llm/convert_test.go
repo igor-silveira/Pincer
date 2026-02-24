@@ -141,7 +141,7 @@ func TestConvertToOpenAIMessages_ResultExpansion(t *testing.T) {
 
 func TestConvertToGeminiContent_UserText(t *testing.T) {
 	m := ChatMessage{Role: RoleUser, Content: "hello"}
-	got := convertToGeminiContent(m)
+	got := convertToGeminiContent(m, nil)
 
 	if got.Role != "user" {
 		t.Errorf("Role = %q, want %q", got.Role, "user")
@@ -153,7 +153,7 @@ func TestConvertToGeminiContent_UserText(t *testing.T) {
 
 func TestConvertToGeminiContent_AssistantText(t *testing.T) {
 	m := ChatMessage{Role: RoleAssistant, Content: "response"}
-	got := convertToGeminiContent(m)
+	got := convertToGeminiContent(m, nil)
 
 	if got.Role != "model" {
 		t.Errorf("Role = %q, want %q (assistant mapped to model)", got.Role, "model")
@@ -167,7 +167,7 @@ func TestConvertToGeminiContent_ToolCalls(t *testing.T) {
 			{ID: "tc1", Name: "shell", Input: json.RawMessage(`{"command":"ls"}`)},
 		},
 	}
-	got := convertToGeminiContent(m)
+	got := convertToGeminiContent(m, nil)
 
 	if len(got.Parts) != 1 {
 		t.Fatalf("Parts len = %d, want 1", len(got.Parts))
@@ -187,7 +187,7 @@ func TestConvertToGeminiContent_ToolResults(t *testing.T) {
 			{ToolCallID: "shell", Content: "file.txt"},
 		},
 	}
-	got := convertToGeminiContent(m)
+	got := convertToGeminiContent(m, nil)
 
 	if len(got.Parts) != 1 {
 		t.Fatalf("Parts len = %d, want 1", len(got.Parts))
@@ -209,7 +209,7 @@ func TestConvertToGeminiContent_RoleMapping(t *testing.T) {
 		{RoleAssistant, "model"},
 	}
 	for _, tt := range tests {
-		got := convertToGeminiContent(ChatMessage{Role: tt.role, Content: "x"})
+		got := convertToGeminiContent(ChatMessage{Role: tt.role, Content: "x"}, nil)
 		if got.Role != tt.want {
 			t.Errorf("role %q mapped to %q, want %q", tt.role, got.Role, tt.want)
 		}

@@ -176,7 +176,7 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		memory:          cfg.Memory,
 		audit:           cfg.Audit,
 		defaultPolicy:   cfg.DefaultPolicy,
-		ctxBuilder:      NewContextBuilder(cfg.MaxTokens),
+		ctxBuilder:      NewContextBuilder(cfg.MaxTokens, cfg.MaxOutputTokens),
 		memoryHashes:    make(map[string]map[string]string),
 	}
 }
@@ -249,6 +249,11 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		logger.Warn("session compaction failed", slog.String("err", err.Error()))
 	}
 
+	var toolDefs []llm.ToolDefinition
+	if r.registry != nil && r.provider.SupportsToolUse() {
+		toolDefs = r.registry.Definitions()
+	}
+
 	var llmErrors int
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 
@@ -263,11 +268,6 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		if len(chatMessages) == 0 {
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("no messages after context building")}
 			return
-		}
-
-		var toolDefs []llm.ToolDefinition
-		if r.registry != nil && r.provider.SupportsToolUse() {
-			toolDefs = r.registry.Definitions()
 		}
 
 		llmStart := time.Now()
@@ -529,19 +529,27 @@ func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logg
 }
 
 func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logger, sessionID, textContent string, toolCalls []llm.ToolCall, usage *llm.Usage) {
-	data, _ := json.Marshal(struct {
+	data, err := json.Marshal(struct {
 		Text      string         `json:"text,omitempty"`
 		ToolCalls []llm.ToolCall `json:"tool_calls"`
 	}{
 		Text:      textContent,
 		ToolCalls: toolCalls,
 	})
+	if err != nil {
+		logger.Error("failed to marshal tool calls", slog.String("err", err.Error()))
+		return
+	}
 
 	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
 }
 
 func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Logger, sessionID string, results []llm.ToolResult) {
-	data, _ := json.Marshal(results)
+	data, err := json.Marshal(results)
+	if err != nil {
+		logger.Error("failed to marshal tool results", slog.String("err", err.Error()))
+		return
+	}
 
 	r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
 }
@@ -594,18 +602,15 @@ func (r *Runtime) buildSmartContext(ctx context.Context, agentID, sessionID stri
 		if lastHashes == nil {
 			lastHashes = make(map[string]string)
 		}
-		r.memoryMu.Unlock()
 
 		memCtx, newHashes, err := r.memory.BuildContext(ctx, agentID, lastHashes)
 		if err == nil {
-			r.memoryMu.Lock()
 			r.memoryHashes[sessionID] = newHashes
-			r.memoryMu.Unlock()
-
 			if memCtx != "" {
 				wsFiles = append(wsFiles, WorkspaceFile{Key: "memory", Content: memCtx})
 			}
 		}
+		r.memoryMu.Unlock()
 	}
 
 	return r.ctxBuilder.Build(wsFiles, history, r.systemPrompt)

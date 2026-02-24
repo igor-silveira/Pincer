@@ -94,8 +94,7 @@ func (t *HTTPTool) Execute(ctx context.Context, input json.RawMessage, sb sandbo
 		req.Header.Set(k, v)
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("http_request: %w", err)
 	}

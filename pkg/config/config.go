@@ -190,7 +190,8 @@ func Current() *Config {
 	if current == nil {
 		return Default()
 	}
-	return current
+	cp := *current
+	return &cp
 }
 
 func DataDir() string {

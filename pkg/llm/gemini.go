@@ -124,11 +124,15 @@ func (g *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 		apiReq.Tools = []geminiToolDecl{{FunctionDeclarations: funcs}}
 	}
 
+	toolCallNames := make(map[string]string)
 	for _, m := range req.Messages {
 		if m.Role == RoleSystem {
 			continue
 		}
-		apiReq.Contents = append(apiReq.Contents, convertToGeminiContent(m))
+		for _, tc := range m.ToolCalls {
+			toolCallNames[tc.ID] = tc.Name
+		}
+		apiReq.Contents = append(apiReq.Contents, convertToGeminiContent(m, toolCallNames))
 	}
 
 	action := "generateContent"
@@ -151,7 +155,7 @@ func (g *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 	), nil
 }
 
-func convertToGeminiContent(m ChatMessage) geminiContent {
+func convertToGeminiContent(m ChatMessage, toolCallNames map[string]string) geminiContent {
 	role := "user"
 	if m.Role == RoleAssistant {
 		role = "model"
@@ -173,9 +177,13 @@ func convertToGeminiContent(m ChatMessage) geminiContent {
 	if m.Role == RoleUser && len(m.ToolResults) > 0 {
 		var parts []geminiPart
 		for _, tr := range m.ToolResults {
+			funcName := tr.ToolCallID
+			if name, ok := toolCallNames[tr.ToolCallID]; ok {
+				funcName = name
+			}
 			parts = append(parts, geminiPart{
 				FunctionResponse: &geminiFuncResponse{
-					Name:     tr.ToolCallID,
+					Name:     funcName,
 					Response: geminiRespBody{Content: tr.Content},
 				},
 			})
@@ -208,6 +216,7 @@ func (g *GeminiProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var usage Usage
+	callIndex := 0
 
 	for scanner.Scan() {
 		select {
@@ -239,10 +248,11 @@ func (g *GeminiProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 					ch <- ChatEvent{Type: EventToken, Token: p.Text}
 				}
 				if p.FunctionCall != nil {
+					callIndex++
 					ch <- ChatEvent{
 						Type: EventToolCall,
 						ToolCall: &ToolCall{
-							ID:    p.FunctionCall.Name,
+							ID:    fmt.Sprintf("gemini_call_%s_%d", p.FunctionCall.Name, callIndex),
 							Name:  p.FunctionCall.Name,
 							Input: p.FunctionCall.Args,
 						},
@@ -265,16 +275,18 @@ func (g *GeminiProvider) readFull(body io.ReadCloser, ch chan<- ChatEvent) {
 		return
 	}
 
+	callIndex := 0
 	for _, c := range resp.Candidates {
 		for _, p := range c.Content.Parts {
 			if p.Text != "" {
 				ch <- ChatEvent{Type: EventToken, Token: p.Text}
 			}
 			if p.FunctionCall != nil {
+				callIndex++
 				ch <- ChatEvent{
 					Type: EventToolCall,
 					ToolCall: &ToolCall{
-						ID:    p.FunctionCall.Name,
+						ID:    fmt.Sprintf("gemini_call_%s_%d", p.FunctionCall.Name, callIndex),
 						Name:  p.FunctionCall.Name,
 						Input: p.FunctionCall.Args,
 					},
