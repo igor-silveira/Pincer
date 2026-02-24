@@ -205,7 +205,7 @@ func DataDir() string {
 }
 
 func DefaultConfigPath() string {
-	return filepath.Join(DataDir(), "pincer.toml.example")
+	return filepath.Join(DataDir(), "pincer.toml")
 }
 
 func EnsureDataDir() error {
