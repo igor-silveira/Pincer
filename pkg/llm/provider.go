@@ -3,6 +3,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
 )
 
 const (
@@ -94,4 +97,32 @@ type Provider interface {
 	SupportsStreaming() bool
 
 	SupportsToolUse() bool
+}
+
+type APIError struct {
+	Provider   string
+	StatusCode int
+	Body       string
+	RetryAfter time.Duration
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("%s: API returned %d: %s", e.Provider, e.StatusCode, e.Body)
+}
+
+func (e *APIError) IsRetryable() bool {
+	switch e.StatusCode {
+	case 429, 503, 529:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsRetryable(err error) (time.Duration, bool) {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.IsRetryable() {
+		return apiErr.RetryAfter, true
+	}
+	return 0, false
 }

@@ -25,6 +25,59 @@ import (
 
 const maxSubagentDepth = 3
 
+const (
+	llmMaxRetries     = 3
+	llmBaseRetryDelay = 5 * time.Second
+	llmMaxRetryDelay  = 60 * time.Second
+)
+
+func (r *Runtime) chatWithRetry(ctx context.Context, logger *slog.Logger, req llm.ChatRequest, notify func(string)) (<-chan llm.ChatEvent, error) {
+	var lastErr error
+	for attempt := 0; attempt <= llmMaxRetries; attempt++ {
+		events, err := r.provider.Chat(ctx, req)
+		if err == nil {
+			return events, nil
+		}
+
+		retryAfter, retryable := llm.IsRetryable(err)
+		if !retryable {
+			return nil, err
+		}
+
+		lastErr = err
+		delay := retryAfter
+		if delay == 0 {
+			delay = llmBaseRetryDelay * (1 << attempt)
+			if delay > llmMaxRetryDelay {
+				delay = llmMaxRetryDelay
+			}
+		}
+
+		if attempt >= llmMaxRetries {
+			break
+		}
+
+		logger.Warn("llm request failed, retrying",
+			slog.Int("attempt", attempt+1),
+			slog.Int("max_retries", llmMaxRetries),
+			slog.Duration("delay", delay),
+			slog.String("err", err.Error()),
+		)
+
+		if notify != nil {
+			notify(fmt.Sprintf("Rate limited, retrying in %s (%d/%d)...", delay.Round(time.Second), attempt+1, llmMaxRetries))
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	return nil, lastErr
+}
+
 type agentCtxKey int
 
 const ctxKeyAutoApprove agentCtxKey = iota
@@ -201,13 +254,15 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		}
 
 		llmStart := time.Now()
-		events, err := r.provider.Chat(ctx, llm.ChatRequest{
+		events, err := r.chatWithRetry(ctx, logger, llm.ChatRequest{
 			Model:     r.model,
 			System:    systemPrompt,
 			Messages:  chatMessages,
 			MaxTokens: r.maxOutputTokens,
 			Stream:    true,
 			Tools:     toolDefs,
+		}, func(msg string) {
+			out <- TurnEvent{Type: TurnProgress, Message: msg}
 		})
 		if err != nil {
 			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
@@ -550,14 +605,14 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 	}
 
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
-		events, err := r.provider.Chat(ctx, llm.ChatRequest{
+		events, err := r.chatWithRetry(ctx, logger, llm.ChatRequest{
 			Model:     r.model,
 			System:    systemPrompt,
 			Messages:  messages,
 			MaxTokens: r.maxOutputTokens,
 			Stream:    false,
 			Tools:     toolDefs,
-		})
+		}, nil)
 		if err != nil {
 			return "", fmt.Errorf("calling LLM: %w", err)
 		}

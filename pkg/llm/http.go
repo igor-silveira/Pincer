@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 func doLLMRequest(ctx context.Context, client *http.Client, providerName, url string, headers map[string]string, body any) (*http.Response, error) {
@@ -33,7 +35,17 @@ func doLLMRequest(ctx context.Context, client *http.Client, providerName, url st
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("%s: API returned %d: %s", providerName, resp.StatusCode, string(errBody))
+		apiErr := &APIError{
+			Provider:   providerName,
+			StatusCode: resp.StatusCode,
+			Body:       string(errBody),
+		}
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			if secs, err := strconv.Atoi(ra); err == nil {
+				apiErr.RetryAfter = time.Duration(secs) * time.Second
+			}
+		}
+		return nil, apiErr
 	}
 
 	return resp, nil
