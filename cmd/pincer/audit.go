@@ -15,7 +15,11 @@ import (
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "View the audit log",
-	RunE:  runAudit,
+	Long:  "Query and display the append-only audit log with optional filters.",
+	Example: `  pincer audit
+  pincer audit --type browser_nav --limit 20
+  pincer audit --session abc123 --since 2025-01-01`,
+	RunE: runAudit,
 }
 
 var (

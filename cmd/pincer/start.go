@@ -21,6 +21,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/channels/telegram"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/channels/whatsapp"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/credentials"
 	"github.com/igorsilveira/pincer/pkg/gateway"
@@ -41,7 +42,11 @@ import (
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Pincer gateway",
-	RunE:  runStart,
+	Long: `Start the AI assistant gateway server. Loads configuration, initializes
+the LLM provider, tool sandbox, channel adapters, and HTTP/WebSocket server.`,
+	Example: `  pincer start
+  pincer start --config /path/to/pincer.toml`,
+	RunE: runStart,
 }
 
 type storeDeps struct {
@@ -191,6 +196,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 	path := cfgFile
 	if path == "" {
 		path = config.DefaultConfigPath()
+	}
+
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+		cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+		fmt.Println()
+		fmt.Println(warnStyle.Render("  No configuration found at " + path))
+		fmt.Println("  Run " + cmdStyle.Render("pincer init") + " to create one, or starting with defaults.")
+		fmt.Println()
 	}
 
 	cfg, err := config.Load(path)

@@ -17,15 +17,18 @@ import (
 var backupCmd = &cobra.Command{
 	Use:   "backup [output-path]",
 	Short: "Snapshot the Pincer data directory to a tarball",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runBackup,
+	Example: `  pincer backup
+  pincer backup ~/backups/pincer-2025.tar.gz`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runBackup,
 }
 
 var restoreCmd = &cobra.Command{
-	Use:   "restore <backup-path>",
-	Short: "Restore Pincer state from a backup tarball",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRestore,
+	Use:     "restore <backup-path>",
+	Short:   "Restore Pincer state from a backup tarball",
+	Example: "  pincer restore pincer-backup-20250101-120000.tar.gz",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runRestore,
 }
 
 func runBackup(cmd *cobra.Command, args []string) error {

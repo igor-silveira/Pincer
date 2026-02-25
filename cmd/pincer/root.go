@@ -12,8 +12,16 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "pincer",
-	Short: "Pincer - a secure, high-performance AI assistant gateway",
-	Long:  "Pincer is a self-hosted AI assistant framework with multi-channel messaging, sandboxed tool execution, and encrypted credential storage.",
+	Short: "Pincer - a self-hosted AI assistant gateway",
+	Long: `Pincer is a self-hosted AI assistant framework that connects to messaging
+platforms, runs agentic tool loops, and manages conversations with persistent
+memory. Single binary, no CGo.
+
+Get started:
+  pincer init     Create a configuration file
+  pincer start    Start the gateway
+  pincer chat     Open the interactive TUI
+  pincer doctor   Check your installation`,
 }
 
 func Execute() error {

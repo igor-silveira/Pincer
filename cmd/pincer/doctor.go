@@ -16,7 +16,10 @@ import (
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Diagnose issues with the Pincer installation",
-	RunE:  runDoctor,
+	Long: `Run diagnostic checks on your Pincer setup including config validation,
+API key detection, database status, container runtime, and gateway health.`,
+	Example: "  pincer doctor",
+	RunE:    runDoctor,
 }
 
 type checkResult struct {

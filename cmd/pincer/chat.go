@@ -9,9 +9,11 @@ import (
 )
 
 var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start an interactive TUI chat session",
-	RunE:  runChat,
+	Use:     "chat",
+	Short:   "Start an interactive TUI chat session",
+	Long:    "Open a terminal-based chat interface connected to the running Pincer gateway.",
+	Example: "  pincer chat",
+	RunE:    runChat,
 }
 
 func runChat(cmd *cobra.Command, args []string) error {

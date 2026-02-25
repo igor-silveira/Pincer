@@ -10,9 +10,10 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Check the health of the Pincer gateway",
-	RunE:  runStatus,
+	Use:     "status",
+	Short:   "Check the health of the Pincer gateway",
+	Example: "  pincer status",
+	RunE:    runStatus,
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
