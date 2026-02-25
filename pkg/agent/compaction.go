@@ -9,15 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
-)
-
-const (
-	compactionThreshold = 40
-	keepRecentMessages  = 10
-	summaryMaxTokens    = 1024
 )
 
 const compactionPrompt = `Summarize this conversation history for use as context in future turns.
@@ -47,7 +42,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("counting messages: %w", err)
 	}
 
-	if count <= compactionThreshold {
+	if count <= config.CompactionThreshold {
 		return nil
 	}
 
@@ -61,7 +56,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("loading messages: %w", err)
 	}
 
-	splitIdx := len(messages) - keepRecentMessages
+	splitIdx := len(messages) - config.CompactionKeepRecent
 	if splitIdx <= 0 {
 		return nil
 	}
@@ -123,7 +118,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 		Model:     r.model,
 		System:    "You are a conversation summarizer for an AI assistant. Produce a structured, factual summary that preserves actionable context. Never fabricate information not present in the conversation.",
 		Messages:  []llm.ChatMessage{{Role: llm.RoleUser, Content: prompt}},
-		MaxTokens: summaryMaxTokens,
+		MaxTokens: config.CompactionMaxTokens,
 		Stream:    false,
 	})
 	if err != nil {

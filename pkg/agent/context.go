@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/store"
 )
@@ -87,9 +88,6 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 	return finalPrompt, messages
 }
 
-const imageTokenEstimate = 1600
-
-const maxRecentImageMessages = 3
 
 func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []llm.ChatMessage {
 	if budget <= 0 || len(history) == 0 {
@@ -116,10 +114,10 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 
 		chatMsg := messageToLLM(m)
 
-		if len(chatMsg.ToolResults) > 0 && imageResultsSeen < maxRecentImageMessages {
+		if len(chatMsg.ToolResults) > 0 && imageResultsSeen < config.MaxRecentImageMessages {
 			for j := range chatMsg.ToolResults {
 				for range chatMsg.ToolResults[j].Images {
-					tokens += imageTokenEstimate
+					tokens += config.ImageTokenEstimate
 				}
 			}
 			resolveImageData(chatMsg.ToolResults)

@@ -220,7 +220,7 @@ func TestBrowserTool_ImageProducerInterface(t *testing.T) {
 
 func TestBrowserTool_AuditLogNilSafe(t *testing.T) {
 	bt := &BrowserTool{}
-	bt.auditLog(context.Background(), "test", "sess", "detail")
+	bt.AuditLog.Log(context.Background(), "test", "sess", "detail")
 }
 
 func TestBrowserTool_StartCleanupAndClose(t *testing.T) {

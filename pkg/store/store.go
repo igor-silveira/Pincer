@@ -111,6 +111,34 @@ func (s *Store) FindSession(ctx context.Context, agentID, channel, peerID string
 	return sess, nil
 }
 
+func (s *Store) GetOrCreateSession(ctx context.Context, id, channel, peerID string) (sess *Session, created bool, err error) {
+	sess, err = s.GetSession(ctx, id)
+	if err == nil {
+		if sess.Channel != channel || sess.PeerID != peerID {
+			if err := s.UpdateSessionChannel(ctx, id, channel, peerID); err != nil {
+				return sess, false, fmt.Errorf("updating session channel: %w", err)
+			}
+			sess.Channel = channel
+			sess.PeerID = peerID
+		}
+		return sess, false, nil
+	}
+
+	now := time.Now().UTC()
+	sess = &Session{
+		ID:        id,
+		AgentID:   "default",
+		Channel:   channel,
+		PeerID:    peerID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.CreateSession(ctx, sess); err != nil {
+		return nil, false, fmt.Errorf("creating session: %w", err)
+	}
+	return sess, true, nil
+}
+
 func (s *Store) TouchSession(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).
 		Model(&Session{}).

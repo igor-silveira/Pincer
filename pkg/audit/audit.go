@@ -131,3 +131,31 @@ type Filter struct {
 	Until     time.Time
 	Limit     int
 }
+
+type ToolLogger struct {
+	logger  *Logger
+	actor   string
+	logFunc func(ctx context.Context, eventType, sessionID, detail string)
+}
+
+func NewToolLogger(logger *Logger, actor string) *ToolLogger {
+	return &ToolLogger{logger: logger, actor: actor}
+}
+
+func NewToolLoggerFunc(fn func(ctx context.Context, eventType, sessionID, detail string)) *ToolLogger {
+	return &ToolLogger{logFunc: fn}
+}
+
+func (tl *ToolLogger) Log(ctx context.Context, eventType, sessionID, detail string) {
+	if tl == nil {
+		return
+	}
+	if tl.logFunc != nil {
+		tl.logFunc(ctx, eventType, sessionID, detail)
+		return
+	}
+	if tl.logger == nil {
+		return
+	}
+	_ = tl.logger.Log(ctx, eventType, sessionID, "", tl.actor, detail)
+}

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -15,26 +14,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
+	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/memory"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
-	"gorm.io/gorm"
 )
 
-const maxSubagentDepth = 3
-
-const (
-	llmMaxRetries     = 3
-	llmBaseRetryDelay = 5 * time.Second
-	llmMaxRetryDelay  = 60 * time.Second
-	maxLLMErrors      = 2
-)
 
 func (r *Runtime) chatWithRetry(ctx context.Context, logger *slog.Logger, req llm.ChatRequest, notify func(string)) (<-chan llm.ChatEvent, error) {
 	var lastErr error
-	for attempt := 0; attempt <= llmMaxRetries; attempt++ {
+	for attempt := 0; attempt <= config.LLMMaxRetries; attempt++ {
 		events, err := r.provider.Chat(ctx, req)
 		if err == nil {
 			return events, nil
@@ -48,25 +39,25 @@ func (r *Runtime) chatWithRetry(ctx context.Context, logger *slog.Logger, req ll
 		lastErr = err
 		delay := retryAfter
 		if delay == 0 {
-			delay = llmBaseRetryDelay * (1 << attempt)
-			if delay > llmMaxRetryDelay {
-				delay = llmMaxRetryDelay
+			delay = config.LLMBaseRetryDelay * (1 << attempt)
+			if delay > config.LLMMaxRetryDelay {
+				delay = config.LLMMaxRetryDelay
 			}
 		}
 
-		if attempt >= llmMaxRetries {
+		if attempt >= config.LLMMaxRetries {
 			break
 		}
 
 		logger.Warn("llm request failed, retrying",
 			slog.Int("attempt", attempt+1),
-			slog.Int("max_retries", llmMaxRetries),
+			slog.Int("max_retries", config.LLMMaxRetries),
 			slog.Duration("delay", delay),
 			slog.String("err", err.Error()),
 		)
 
 		if notify != nil {
-			notify(fmt.Sprintf("Rate limited, retrying in %s (%d/%d)...", delay.Round(time.Second), attempt+1, llmMaxRetries))
+			notify(fmt.Sprintf("Rate limited, retrying in %s (%d/%d)...", delay.Round(time.Second), attempt+1, config.LLMMaxRetries))
 		}
 
 		select {
@@ -151,13 +142,13 @@ type RuntimeConfig struct {
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 128000
+		cfg.MaxTokens = config.DefaultMaxContextTokens
 	}
 	if cfg.MaxOutputTokens <= 0 {
-		cfg.MaxOutputTokens = 4096
+		cfg.MaxOutputTokens = config.DefaultMaxOutputTokens
 	}
 	if cfg.MaxToolIterations <= 0 {
-		cfg.MaxToolIterations = 25
+		cfg.MaxToolIterations = config.DefaultMaxToolIterations
 	}
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = defaultSystemPrompt
@@ -228,7 +219,7 @@ func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<
 		slog.String("session_id", session.ID),
 	)
 
-	out := make(chan TurnEvent, 64)
+	out := make(chan TurnEvent, config.TurnEventBufferSize)
 	go r.runAgenticLoop(ctx, session.ID, out)
 
 	return out, nil
@@ -257,7 +248,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 	var llmErrors int
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 
-		history, err := r.store.RecentMessages(ctx, sessionID, 50)
+		history, err := r.store.RecentMessages(ctx, sessionID, config.RecentMessagesLimit)
 		if err != nil {
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("loading history: %w", err)}
 			return
@@ -284,7 +275,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		if err != nil {
 			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
 			llmErrors++
-			if llmErrors > maxLLMErrors {
+			if llmErrors > config.LLMMaxErrors {
 				out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("calling LLM: %w", err)}
 				return
 			}
@@ -292,9 +283,11 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				slog.Int("llm_errors", llmErrors),
 				slog.String("err", err.Error()),
 			)
-			errMsg := fmt.Sprintf("[System: LLM call failed: %s. To recover: (1) reduce parallel tool calls, (2) produce a shorter response, (3) break the task into a smaller step. Do not repeat the exact same approach.]", truncate(err.Error(), 300))
-			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
-			out <- TurnEvent{Type: TurnProgress, Message: fmt.Sprintf("LLM error, retrying with error context (%d/%d)...", llmErrors, maxLLMErrors)}
+			errMsg := fmt.Sprintf("[System: LLM call failed: %s. To recover: (1) reduce parallel tool calls, (2) produce a shorter response, (3) break the task into a smaller step. Do not repeat the exact same approach.]", truncate(err.Error(), config.ErrorTruncateLen))
+			if pErr := r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil); pErr != nil {
+				logger.Error("failed to persist LLM error context", slog.String("err", pErr.Error()))
+			}
+			out <- TurnEvent{Type: TurnProgress, Message: fmt.Sprintf("LLM error, retrying with error context (%d/%d)...", llmErrors, config.LLMMaxErrors)}
 			continue
 		}
 
@@ -324,7 +317,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		if streamErr != nil {
 			telemetry.Metrics.ErrorsTotal.WithLabelValues("llm").Inc()
 			llmErrors++
-			if llmErrors > maxLLMErrors {
+			if llmErrors > config.LLMMaxErrors {
 				logger.Error("llm stream error, max retries exceeded", slog.String("err", streamErr.Error()))
 				out <- TurnEvent{Type: TurnError, Error: streamErr}
 				return
@@ -333,8 +326,10 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				slog.Int("llm_errors", llmErrors),
 				slog.String("err", streamErr.Error()),
 			)
-			errMsg := fmt.Sprintf("[System: Response stream interrupted: %s. Your previous output was lost. Retry with a shorter response or fewer tool calls. If this recurs, complete the task in smaller increments.]", truncate(streamErr.Error(), 300))
-			r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil)
+			errMsg := fmt.Sprintf("[System: Response stream interrupted: %s. Your previous output was lost. Retry with a shorter response or fewer tool calls. If this recurs, complete the task in smaller increments.]", truncate(streamErr.Error(), config.ErrorTruncateLen))
+			if pErr := r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeText, errMsg, nil); pErr != nil {
+				logger.Error("failed to persist stream error context", slog.String("err", pErr.Error()))
+			}
 			out <- TurnEvent{Type: TurnProgress, Message: "Stream interrupted, retrying..."}
 			continue
 		}
@@ -355,12 +350,18 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		)
 
 		if len(toolCalls) == 0 {
-			r.persistAssistantMessage(ctx, logger, sessionID, string(textContent), usage)
+			if err := r.persistAssistantMessage(ctx, sessionID, string(textContent), usage); err != nil {
+				out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting assistant message: %w", err)}
+				return
+			}
 			out <- TurnEvent{Type: TurnDone, Message: string(textContent), Usage: usage}
 			return
 		}
 
-		r.persistToolCallMessage(ctx, logger, sessionID, string(textContent), toolCalls, usage)
+		if err := r.persistToolCallMessage(ctx, sessionID, string(textContent), toolCalls, usage); err != nil {
+			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting tool calls: %w", err)}
+			return
+		}
 
 		var toolResults []llm.ToolResult
 		var toolNames []string
@@ -370,12 +371,15 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			toolNames = append(toolNames, tc.Name)
 			msg := fmt.Sprintf("%s completed", tc.Name)
 			if result.IsError {
-				msg = fmt.Sprintf("%s failed: %s", tc.Name, truncate(result.Content, 200))
+				msg = fmt.Sprintf("%s failed: %s", tc.Name, truncate(result.Content, config.ToolResultTruncateLen))
 			}
 			out <- TurnEvent{Type: TurnToolResult, Message: msg}
 		}
 
-		r.persistToolResultMessage(ctx, logger, sessionID, toolResults)
+		if err := r.persistToolResultMessage(ctx, sessionID, toolResults); err != nil {
+			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting tool results: %w", err)}
+			return
+		}
 
 		out <- TurnEvent{
 			Type:    TurnProgress,
@@ -429,23 +433,6 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		r.auditLog(ctx, audit.EventToolApprove, sessionID, tc.Name, "")
 	}
 
-	if r.registry == nil {
-		return llm.ToolResult{
-			ToolCallID: tc.ID,
-			Content:    "no tools available",
-			IsError:    true,
-		}
-	}
-
-	tool, err := r.registry.Get(tc.Name)
-	if err != nil {
-		return llm.ToolResult{
-			ToolCallID: tc.ID,
-			Content:    fmt.Sprintf("unknown tool: %s", tc.Name),
-			IsError:    true,
-		}
-	}
-
 	policy := r.defaultPolicy
 	if policy.Timeout == 0 {
 		policy = sandbox.DefaultPolicy()
@@ -454,49 +441,18 @@ func (r *Runtime) executeTool(ctx context.Context, logger *slog.Logger, sessionI
 		policy.RequireApproval = false
 	}
 
-	start := time.Now()
-	output, err := tool.Execute(ctx, tc.Input, r.sandbox, policy)
-	elapsed := time.Since(start)
+	result := runTool(ctx, logger, tc, r.registry, r.sandbox, policy)
 
-	telemetry.Metrics.ToolDuration.WithLabelValues(tc.Name).Observe(elapsed.Seconds())
-
-	if err != nil {
-		telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "error").Inc()
-		telemetry.Metrics.ErrorsTotal.WithLabelValues("tool").Inc()
-		logger.Error("tool execution failed",
-			slog.String("tool", tc.Name),
-			slog.Duration("duration", elapsed),
-			slog.String("err", err.Error()),
-		)
-		r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name,
-			fmt.Sprintf("error: %v", err))
-		return llm.ToolResult{
-			ToolCallID: tc.ID,
-			Content:    fmt.Sprintf("error: %v", err),
-			IsError:    true,
-		}
+	if result.IsError {
+		r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, result.Content)
+	} else {
+		r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
 	}
 
-	telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "ok").Inc()
-	logger.Info("tool execution completed",
-		slog.String("tool", tc.Name),
-		slog.Duration("duration", elapsed),
-		slog.Int("output_len", len(output)),
-	)
-
-	r.auditLog(ctx, audit.EventToolExec, sessionID, tc.Name, "ok")
-
-	result := llm.ToolResult{
-		ToolCallID: tc.ID,
-		Content:    output,
-	}
-	if ip, ok := tool.(tools.ImageProducer); ok {
-		result.Images = ip.ConsumeImages(ctx)
-	}
 	return result
 }
 
-func (r *Runtime) persistMessage(ctx context.Context, logger *slog.Logger, sessionID, role, contentType, content string, usage *llm.Usage) {
+func (r *Runtime) persistMessage(ctx context.Context, sessionID, role, contentType, content string, usage *llm.Usage) error {
 	tokenCount := 0
 	if usage != nil {
 		tokenCount = usage.OutputTokens
@@ -512,23 +468,17 @@ func (r *Runtime) persistMessage(ctx context.Context, logger *slog.Logger, sessi
 		CreatedAt:   time.Now().UTC(),
 	}
 
-	if err := r.store.AppendMessage(ctx, msg); err != nil {
-		logger.Error("failed to persist message",
-			slog.String("content_type", contentType),
-			slog.String("err", err.Error()),
-		)
-	}
+	return r.store.AppendMessage(ctx, msg)
 }
 
-func (r *Runtime) persistAssistantMessage(ctx context.Context, logger *slog.Logger, sessionID, content string, usage *llm.Usage) {
-	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeText, content, usage)
-
-	if err := r.store.TouchSession(ctx, sessionID); err != nil {
-		logger.Error("failed to touch session", slog.String("err", err.Error()))
+func (r *Runtime) persistAssistantMessage(ctx context.Context, sessionID, content string, usage *llm.Usage) error {
+	if err := r.persistMessage(ctx, sessionID, llm.RoleAssistant, store.ContentTypeText, content, usage); err != nil {
+		return err
 	}
+	return r.store.TouchSession(ctx, sessionID)
 }
 
-func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logger, sessionID, textContent string, toolCalls []llm.ToolCall, usage *llm.Usage) {
+func (r *Runtime) persistToolCallMessage(ctx context.Context, sessionID, textContent string, toolCalls []llm.ToolCall, usage *llm.Usage) error {
 	data, err := json.Marshal(struct {
 		Text      string         `json:"text,omitempty"`
 		ToolCalls []llm.ToolCall `json:"tool_calls"`
@@ -537,21 +487,19 @@ func (r *Runtime) persistToolCallMessage(ctx context.Context, logger *slog.Logge
 		ToolCalls: toolCalls,
 	})
 	if err != nil {
-		logger.Error("failed to marshal tool calls", slog.String("err", err.Error()))
-		return
+		return fmt.Errorf("marshaling tool calls: %w", err)
 	}
 
-	r.persistMessage(ctx, logger, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
+	return r.persistMessage(ctx, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
 }
 
-func (r *Runtime) persistToolResultMessage(ctx context.Context, logger *slog.Logger, sessionID string, results []llm.ToolResult) {
+func (r *Runtime) persistToolResultMessage(ctx context.Context, sessionID string, results []llm.ToolResult) error {
 	data, err := json.Marshal(results)
 	if err != nil {
-		logger.Error("failed to marshal tool results", slog.String("err", err.Error()))
-		return
+		return fmt.Errorf("marshaling tool results: %w", err)
 	}
 
-	r.persistMessage(ctx, logger, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
+	return r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
 }
 
 func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
@@ -563,29 +511,15 @@ func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {
 }
 
 func (r *Runtime) getOrCreateSession(ctx context.Context, sessionID string) (*store.Session, error) {
-	sess, err := r.store.GetSession(ctx, sessionID)
-	if err == nil {
-		return sess, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	sess, created, err := r.store.GetOrCreateSession(ctx, sessionID, "webchat", "anonymous")
+	if err != nil {
 		return nil, err
 	}
-
-	now := time.Now().UTC()
-	sess = &store.Session{
-		ID:        sessionID,
-		AgentID:   "default",
-		Channel:   "webchat",
-		PeerID:    "anonymous",
-		CreatedAt: now,
-		UpdatedAt: now,
+	if created {
+		telemetry.Metrics.ActiveSessions.Inc()
+		r.auditLog(ctx, audit.EventSessionNew, sessionID, "system",
+			fmt.Sprintf("channel=%s peer=%s", sess.Channel, sess.PeerID))
 	}
-	if err := r.store.CreateSession(ctx, sess); err != nil {
-		return nil, fmt.Errorf("creating session: %w", err)
-	}
-	telemetry.Metrics.ActiveSessions.Inc()
-	r.auditLog(ctx, audit.EventSessionNew, sessionID, "system",
-		fmt.Sprintf("channel=%s peer=%s", sess.Channel, sess.PeerID))
 	return sess, nil
 }
 
@@ -625,8 +559,8 @@ func (r *Runtime) auditLog(ctx context.Context, eventType, sessionID, actor, det
 
 func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []string) (string, error) {
 	depth := tools.SubagentDepthFromContext(ctx)
-	if depth >= maxSubagentDepth {
-		return "", fmt.Errorf("subagent depth limit exceeded (max %d)", maxSubagentDepth)
+	if depth >= config.MaxSubagentDepth {
+		return "", fmt.Errorf("subagent depth limit exceeded (max %d)", config.MaxSubagentDepth)
 	}
 
 	ctx = tools.WithSubagentDepth(ctx, depth+1)
@@ -667,7 +601,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 		}, nil)
 		if err != nil {
 			llmErrors++
-			if llmErrors > maxLLMErrors {
+			if llmErrors > config.LLMMaxErrors {
 				return "", fmt.Errorf("calling LLM: %w", err)
 			}
 			logger.Warn("subagent llm call failed, injecting error context",
@@ -676,7 +610,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			)
 			messages = append(messages, llm.ChatMessage{
 				Role:    llm.RoleUser,
-				Content: fmt.Sprintf("[System: LLM call failed: %s. Reduce response length or tool call count and try a different approach.]", truncate(err.Error(), 300)),
+				Content: fmt.Sprintf("[System: LLM call failed: %s. Reduce response length or tool call count and try a different approach.]", truncate(err.Error(), config.ErrorTruncateLen)),
 			})
 			continue
 		}
@@ -698,7 +632,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 
 		if streamErr != nil {
 			llmErrors++
-			if llmErrors > maxLLMErrors {
+			if llmErrors > config.LLMMaxErrors {
 				return "", fmt.Errorf("LLM error: %w", streamErr)
 			}
 			logger.Warn("subagent stream error, injecting error context",
@@ -707,7 +641,7 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 			)
 			messages = append(messages, llm.ChatMessage{
 				Role:    llm.RoleUser,
-				Content: fmt.Sprintf("[System: Stream interrupted: %s. Previous output was lost. Retry with a shorter response or break into smaller steps.]", truncate(streamErr.Error(), 300)),
+				Content: fmt.Sprintf("[System: Stream interrupted: %s. Previous output was lost. Retry with a shorter response or break into smaller steps.]", truncate(streamErr.Error(), config.ErrorTruncateLen)),
 			})
 			continue
 		}
@@ -727,7 +661,12 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 
 		var toolResults []llm.ToolResult
 		for _, tc := range toolCalls {
-			result := executeSubagentTool(ctx, logger, sessionID, tc, registry, r.sandbox, r.defaultPolicy)
+			policy := r.defaultPolicy
+			if policy.Timeout == 0 {
+				policy = sandbox.DefaultPolicy()
+			}
+			policy.RequireApproval = false
+			result := runTool(ctx, logger, tc, registry, r.sandbox, policy)
 			toolResults = append(toolResults, result)
 		}
 
@@ -753,7 +692,7 @@ func (r *Runtime) buildSubagentContext(ctx context.Context, agentID, sessionID s
 	return systemPrompt
 }
 
-func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID string, tc llm.ToolCall, registry *tools.Registry, sb sandbox.Sandbox, defaultPolicy sandbox.Policy) llm.ToolResult {
+func runTool(ctx context.Context, logger *slog.Logger, tc llm.ToolCall, registry *tools.Registry, sb sandbox.Sandbox, policy sandbox.Policy) llm.ToolResult {
 	if registry == nil {
 		return llm.ToolResult{
 			ToolCallID: tc.ID,
@@ -771,12 +710,6 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 		}
 	}
 
-	policy := defaultPolicy
-	if policy.Timeout == 0 {
-		policy = sandbox.DefaultPolicy()
-	}
-	policy.RequireApproval = false
-
 	start := time.Now()
 	output, err := tool.Execute(ctx, tc.Input, sb, policy)
 	elapsed := time.Since(start)
@@ -786,7 +719,7 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 	if err != nil {
 		telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "error").Inc()
 		telemetry.Metrics.ErrorsTotal.WithLabelValues("tool").Inc()
-		logger.Error("subagent tool execution failed",
+		logger.Error("tool execution failed",
 			slog.String("tool", tc.Name),
 			slog.Duration("duration", elapsed),
 			slog.String("err", err.Error()),
@@ -799,7 +732,7 @@ func executeSubagentTool(ctx context.Context, logger *slog.Logger, sessionID str
 	}
 
 	telemetry.Metrics.ToolExecutions.WithLabelValues(tc.Name, "ok").Inc()
-	logger.Info("subagent tool execution completed",
+	logger.Info("tool execution completed",
 		slog.String("tool", tc.Name),
 		slog.Duration("duration", elapsed),
 		slog.Int("output_len", len(output)),

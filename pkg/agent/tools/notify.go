@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
@@ -14,7 +15,7 @@ type NotifyTool struct {
 	BaseCtx       context.Context
 	RunAndDeliver func(ctx context.Context, sessionID, prompt string)
 	Send          func(ctx context.Context, sessionID, content string) error
-	AuditLog      func(ctx context.Context, eventType, sessionID, detail string)
+	AuditLog      *audit.ToolLogger
 }
 
 type notifyInput struct {
@@ -86,7 +87,7 @@ func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 			t.RunAndDeliver(baseCtx, sid, prompt)
 		})
 
-		t.auditLog(ctx, "notify_schedule", sid, fmt.Sprintf("delay=%s prompt=%s", delay, params.Message))
+		t.AuditLog.Log(ctx, "notify_schedule", sid, fmt.Sprintf("delay=%s prompt=%s", delay, params.Message))
 
 		return fmt.Sprintf("scheduled: will run in %s", delay), nil
 
@@ -104,8 +105,3 @@ func (t *NotifyTool) Execute(ctx context.Context, input json.RawMessage, _ sandb
 	}
 }
 
-func (t *NotifyTool) auditLog(ctx context.Context, eventType, sessionID, detail string) {
-	if t.AuditLog != nil {
-		t.AuditLog(ctx, eventType, sessionID, detail)
-	}
-}

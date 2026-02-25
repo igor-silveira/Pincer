@@ -1,0 +1,29 @@
+package config
+
+import "time"
+
+const (
+	DefaultMaxContextTokens  = 128000
+	DefaultMaxOutputTokens   = 4096
+	DefaultMaxToolIterations = 25
+
+	LLMMaxRetries     = 3
+	LLMBaseRetryDelay = 5 * time.Second
+	LLMMaxRetryDelay  = 60 * time.Second
+	LLMMaxErrors      = 2
+
+	MaxSubagentDepth = 3
+
+	CompactionThreshold  = 40
+	CompactionKeepRecent = 10
+	CompactionMaxTokens  = 1024
+
+	ImageTokenEstimate     = 1600
+	MaxRecentImageMessages = 3
+	RecentMessagesLimit    = 50
+
+	TurnEventBufferSize = 64
+
+	ErrorTruncateLen      = 300
+	ToolResultTruncateLen = 200
+)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
@@ -12,7 +13,7 @@ import (
 type SpawnTool struct {
 	RunSpawn   func(ctx context.Context, sessionID, prompt string, allowedTools []string) string
 	CheckSpawn func(spawnID string) (result string, done bool, err error)
-	AuditLog   func(ctx context.Context, eventType, sessionID, detail string)
+	AuditLog   *audit.ToolLogger
 }
 
 type spawnInput struct {

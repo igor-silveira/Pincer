@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/store"
 )
@@ -406,7 +407,7 @@ func TestSelectHistory_StripsImagesFromOldMessages(t *testing.T) {
 		}
 	}
 
-	if imagesKept > maxRecentImageMessages {
-		t.Errorf("kept %d image-bearing results, want at most %d", imagesKept, maxRecentImageMessages)
+	if imagesKept > config.MaxRecentImageMessages {
+		t.Errorf("kept %d image-bearing results, want at most %d", imagesKept, config.MaxRecentImageMessages)
 	}
 }

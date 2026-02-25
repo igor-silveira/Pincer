@@ -256,11 +256,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	registry.Register(&tools.SubagentTool{
 		RunSubturn: runtime.RunSubturn,
-		AuditLog: func(ctx context.Context, eventType, sessionID, detail string) {
-			if deps.auditLog != nil {
-				_ = deps.auditLog.Log(ctx, eventType, sessionID, "", "subagent", detail)
-			}
-		},
+		AuditLog:   audit.NewToolLogger(deps.auditLog, "subagent"),
 	})
 
 	if cfg.Browser.Enabled {
@@ -275,11 +271,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			DataDir:     config.DataDir(),
 			Headless:    cfg.Browser.Headless,
 			IdleTimeout: idleTimeout,
-			AuditLog: func(ctx context.Context, eventType, sessionID, detail string) {
-				if deps.auditLog != nil {
-					_ = deps.auditLog.Log(ctx, eventType, sessionID, "", "browser", detail)
-				}
-			},
+			AuditLog:    audit.NewToolLogger(deps.auditLog, "browser"),
 		}
 		browserTool.StartCleanup()
 		defer browserTool.Close()
@@ -300,12 +292,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 			BaseCtx:       ctx,
 			RunAndDeliver: router.RunAndDeliver,
 			Send:          router.SendToSession,
-			AuditLog:      router.AuditLog,
+			AuditLog:      audit.NewToolLogger(deps.auditLog, "notify"),
 		})
 		registry.Register(&tools.SpawnTool{
 			RunSpawn:   router.RunSpawnAgent,
 			CheckSpawn: router.CheckSpawn,
-			AuditLog:   router.AuditLog,
+			AuditLog:   audit.NewToolLogger(deps.auditLog, "spawn"),
 		})
 	}
 

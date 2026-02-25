@@ -13,6 +13,7 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
@@ -26,7 +27,7 @@ type BrowserTool struct {
 	DataDir     string
 	Headless    bool
 	IdleTimeout time.Duration
-	AuditLog    func(ctx context.Context, eventType, sessionID, detail string)
+	AuditLog    *audit.ToolLogger
 
 	mu            sync.Mutex
 	sessions      map[string]*browserSession
@@ -370,7 +371,7 @@ func (t *BrowserTool) doNavigate(ctx context.Context, sessionID string, params b
 		return "", fmt.Errorf("browser: navigate failed: %w", err)
 	}
 
-	t.auditLog(ctx, "browser_nav", sessionID, params.URL)
+	t.AuditLog.Log(ctx, "browser_nav", sessionID, params.URL)
 
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
@@ -649,15 +650,10 @@ func (t *BrowserTool) doClose(ctx context.Context, sessionID string) (string, er
 		return "no browser session to close", nil
 	}
 
-	t.auditLog(ctx, "browser_close", sessionID, "")
+	t.AuditLog.Log(ctx, "browser_close", sessionID, "")
 	return "browser session closed", nil
 }
 
-func (t *BrowserTool) auditLog(ctx context.Context, eventType, sessionID, detail string) {
-	if t.AuditLog != nil {
-		t.AuditLog(ctx, eventType, sessionID, detail)
-	}
-}
 
 const defaultActionTimeout = 90 * time.Second
 const navigationTimeout = 3 * time.Minute

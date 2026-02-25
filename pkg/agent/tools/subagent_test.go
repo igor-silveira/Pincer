@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
 
@@ -97,9 +98,9 @@ func TestSubagentTool_AuditLogging(t *testing.T) {
 		RunSubturn: func(_ context.Context, _ string, _ []string) (string, error) {
 			return "done", nil
 		},
-		AuditLog: func(_ context.Context, eventType, _, _ string) {
+		AuditLog: audit.NewToolLoggerFunc(func(_ context.Context, eventType, _, _ string) {
 			events = append(events, eventType)
-		},
+		}),
 	}
 
 	input, _ := json.Marshal(subagentInput{Task: "audit me"})
@@ -124,9 +125,9 @@ func TestSubagentTool_AuditLoggingOnError(t *testing.T) {
 		RunSubturn: func(_ context.Context, _ string, _ []string) (string, error) {
 			return "", fmt.Errorf("boom")
 		},
-		AuditLog: func(_ context.Context, eventType, _, _ string) {
+		AuditLog: audit.NewToolLoggerFunc(func(_ context.Context, eventType, _, _ string) {
 			events = append(events, eventType)
-		},
+		}),
 	}
 
 	input, _ := json.Marshal(subagentInput{Task: "fail"})

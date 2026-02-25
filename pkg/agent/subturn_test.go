@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/store"
@@ -93,7 +94,7 @@ func TestRunSubturn_DepthLimitExceeded(t *testing.T) {
 
 	rt := newSubturnRuntime(t, fp)
 	ctx := tools.WithSessionInfo(context.Background(), "sess-deep", "agent-1")
-	ctx = tools.WithSubagentDepth(ctx, maxSubagentDepth)
+	ctx = tools.WithSubagentDepth(ctx, config.MaxSubagentDepth)
 
 	_, err := rt.RunSubturn(ctx, "too deep", nil)
 	if err == nil {

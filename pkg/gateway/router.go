@@ -29,7 +29,7 @@ type ChannelRouter struct {
 	approver       *agent.Approver
 	logger         *slog.Logger
 	store          *store.Store
-	audit          *audit.Logger
+	auditLog       *audit.ToolLogger
 	spawnResults   map[string]*spawnResult
 	spawnResultsMu sync.Mutex
 }
@@ -41,7 +41,7 @@ func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, appro
 		approver:     approver,
 		logger:       logger,
 		store:        db,
-		audit:        auditLog,
+		auditLog:     audit.NewToolLogger(auditLog, "router"),
 		spawnResults: make(map[string]*spawnResult),
 	}
 }
@@ -197,30 +197,8 @@ func (cr *ChannelRouter) sendApprovalRequest(ctx context.Context, adapter channe
 }
 
 func (cr *ChannelRouter) ensureSession(ctx context.Context, msg channels.InboundMessage) {
-	sess, err := cr.store.GetSession(ctx, msg.SessionID)
-	if err == nil {
-		if sess.Channel != msg.ChannelName || sess.PeerID != msg.PeerID {
-			if err := cr.store.UpdateSessionChannel(ctx, msg.SessionID, msg.ChannelName, msg.PeerID); err != nil {
-				cr.logger.Warn("failed to update session channel",
-					slog.String("session_id", msg.SessionID),
-					slog.String("err", err.Error()),
-				)
-			}
-		}
-		return
-	}
-
-	now := time.Now().UTC()
-	newSess := &store.Session{
-		ID:        msg.SessionID,
-		AgentID:   "default",
-		Channel:   msg.ChannelName,
-		PeerID:    msg.PeerID,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if err := cr.store.CreateSession(ctx, newSess); err != nil {
-		cr.logger.Debug("session already exists or create failed",
+	if _, _, err := cr.store.GetOrCreateSession(ctx, msg.SessionID, msg.ChannelName, msg.PeerID); err != nil {
+		cr.logger.Warn("failed to ensure session",
 			slog.String("session_id", msg.SessionID),
 			slog.String("err", err.Error()),
 		)
@@ -269,7 +247,7 @@ func (cr *ChannelRouter) SendToSession(ctx context.Context, sessionID, content s
 		}
 	}
 
-	cr.AuditLog(ctx, audit.EventNotifySend, sessionID, fmt.Sprintf("len=%d", len(content)))
+	cr.auditLog.Log(ctx, audit.EventNotifySend, sessionID, fmt.Sprintf("len=%d", len(content)))
 
 	return adapter.Send(ctx, channels.OutboundMessage{
 		SessionID: sessionID,
@@ -296,7 +274,7 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 		slog.String("turn_id", turnID),
 	)
 
-	cr.AuditLog(ctx, audit.EventNotifyDeliver, sessionID, fmt.Sprintf("turn_id=%s prompt=%s", turnID, prompt))
+	cr.auditLog.Log(ctx, audit.EventNotifyDeliver, sessionID, fmt.Sprintf("turn_id=%s prompt=%s", turnID, prompt))
 
 	stopTyping := cr.startTypingLoop(ctx, adapter, sessionID)
 
@@ -377,7 +355,7 @@ func (cr *ChannelRouter) RunSpawnAgent(ctx context.Context, sessionID, prompt st
 	cr.spawnResults[spawnID] = &spawnResult{Done: false}
 	cr.spawnResultsMu.Unlock()
 
-	cr.AuditLog(ctx, audit.EventSpawnStart, sessionID, fmt.Sprintf("spawn_id=%s task=%s", spawnID, prompt))
+	cr.auditLog.Log(ctx, audit.EventSpawnStart, sessionID, fmt.Sprintf("spawn_id=%s task=%s", spawnID, prompt))
 
 	go func() {
 		spawnCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -408,11 +386,11 @@ func (cr *ChannelRouter) RunSpawnAgent(ctx context.Context, sessionID, prompt st
 		cr.spawnResultsMu.Unlock()
 
 		if err != nil {
-			cr.AuditLog(spawnCtx, audit.EventSpawnError, sessionID, fmt.Sprintf("spawn_id=%s error=%v", spawnID, err))
+			cr.auditLog.Log(spawnCtx, audit.EventSpawnError, sessionID, fmt.Sprintf("spawn_id=%s error=%v", spawnID, err))
 			return
 		}
 
-		cr.AuditLog(spawnCtx, audit.EventSpawnDeliver, sessionID, fmt.Sprintf("spawn_id=%s result_len=%d", spawnID, len(result)))
+		cr.auditLog.Log(spawnCtx, audit.EventSpawnDeliver, sessionID, fmt.Sprintf("spawn_id=%s result_len=%d", spawnID, len(result)))
 
 		deliverMsg := fmt.Sprintf("[Background Task Result]\n%s", result)
 		if err := cr.SendToSession(spawnCtx, sessionID, deliverMsg); err != nil {
@@ -447,12 +425,6 @@ func (cr *ChannelRouter) CheckSpawn(spawnID string) (string, bool, error) {
 	return sr.Result, true, nil
 }
 
-func (cr *ChannelRouter) AuditLog(ctx context.Context, eventType, sessionID, detail string) {
-	if cr.audit == nil {
-		return
-	}
-	_ = cr.audit.Log(ctx, eventType, sessionID, "", "notify", detail)
-}
 
 func parseTextApproval(text string) (channels.InboundApprovalResponse, bool) {
 	text = strings.TrimSpace(text)
