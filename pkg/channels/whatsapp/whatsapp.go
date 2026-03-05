@@ -164,4 +164,3 @@ func (a *Adapter) handleEvent(evt interface{}) {
 		}
 	}
 }
-
