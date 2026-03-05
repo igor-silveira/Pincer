@@ -398,7 +398,11 @@ func initChannelAdapters(ctx context.Context, cfg *config.Config, logger *slog.L
 			return slackadapter.New(channelToken(c, "slack"), os.Getenv("SLACK_APP_TOKEN"))
 		}},
 		{"whatsapp", "WHATSAPP_DB_PATH", func(c *config.Config) (channels.Adapter, error) {
-			return whatsapp.New("")
+			var allowList []string
+			if ch, ok := c.Channels["whatsapp"]; ok {
+				allowList = ch.AllowList
+			}
+			return whatsapp.New("", allowList)
 		}},
 		{"matrix", "MATRIX_HOMESERVER", func(c *config.Config) (channels.Adapter, error) {
 			return matrix.New(matrix.Config{})

@@ -15,23 +15,29 @@ import (
 )
 
 type Adapter struct {
-	client   *whatsmeow.Client
-	dbPath   string
-	inbound  chan channels.InboundMessage
-	sessions *channels.SessionMap[types.JID]
+	client    *whatsmeow.Client
+	dbPath    string
+	allowList map[string]struct{}
+	inbound   chan channels.InboundMessage
+	sessions  *channels.SessionMap[types.JID]
 }
 
-func New(dbPath string) (*Adapter, error) {
+func New(dbPath string, allowList []string) (*Adapter, error) {
 	if dbPath == "" {
 		dbPath = os.Getenv("WHATSAPP_DB_PATH")
 	}
 	if dbPath == "" {
 		dbPath = "whatsapp.db"
 	}
+	al := make(map[string]struct{}, len(allowList))
+	for _, v := range allowList {
+		al[v] = struct{}{}
+	}
 	return &Adapter{
-		dbPath:   dbPath,
-		inbound:  make(chan channels.InboundMessage, 256),
-		sessions: channels.NewSessionMap[types.JID]("wa", func(k types.JID) string { return k.User }),
+		dbPath:    dbPath,
+		allowList: al,
+		inbound:   make(chan channels.InboundMessage, 256),
+		sessions:  channels.NewSessionMap[types.JID]("wa", func(k types.JID) string { return k.User }),
 	}, nil
 }
 
@@ -123,6 +129,12 @@ func (a *Adapter) handleEvent(evt interface{}) {
 	case *events.Message:
 		if v.Message == nil {
 			return
+		}
+
+		if len(a.allowList) > 0 {
+			if _, ok := a.allowList[v.Info.Sender.User]; !ok {
+				return
+			}
 		}
 
 		text := v.Message.GetConversation()

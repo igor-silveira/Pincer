@@ -44,9 +44,10 @@ type AgentConfig struct {
 }
 
 type ChannelConfig struct {
-	Enabled  bool   `toml:"enabled"`
-	Token    string `toml:"token"`
-	TokenEnv string `toml:"token_env"`
+	Enabled   bool     `toml:"enabled"`
+	Token     string   `toml:"token"`
+	TokenEnv  string   `toml:"token_env"`
+	AllowList []string `toml:"allow_list"`
 }
 
 type SandboxConfig struct {
