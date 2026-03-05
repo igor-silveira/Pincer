@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
+	qrcode "github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -69,7 +70,13 @@ func (a *Adapter) Start(ctx context.Context) error {
 		}
 		for evt := range qrChan {
 			if evt.Event == "code" {
-				fmt.Printf("WhatsApp QR code: %s\n", evt.Code)
+				qr, err := qrcode.New(evt.Code, qrcode.Medium)
+				if err != nil {
+					fmt.Printf("WhatsApp QR code: %s\n", evt.Code)
+					continue
+				}
+				fmt.Println("Scan this QR code with WhatsApp:")
+				fmt.Println(qr.ToSmallString(false))
 			}
 		}
 	} else {
