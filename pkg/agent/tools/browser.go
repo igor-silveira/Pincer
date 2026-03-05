@@ -271,10 +271,19 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 	allocCtx, allocCancel := chromedp.NewExecAllocator(baseCtx, opts...)
 	taskCtx, taskCancel := chromedp.NewContext(allocCtx)
 
-	if err := chromedp.Run(taskCtx); err != nil {
+	startErr := make(chan error, 1)
+	go func() { startErr <- chromedp.Run(taskCtx) }()
+	select {
+	case err := <-startErr:
+		if err != nil {
+			taskCancel()
+			allocCancel()
+			return nil, fmt.Errorf("browser: starting chrome: %w", err)
+		}
+	case <-time.After(30 * time.Second):
 		taskCancel()
 		allocCancel()
-		return nil, fmt.Errorf("browser: starting chrome: %w", err)
+		return nil, fmt.Errorf("browser: starting chrome: timed out after 30s")
 	}
 
 	t.sessions[sessionID] = &browserSession{
