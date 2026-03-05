@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/igorsilveira/pincer/pkg/channels"
@@ -56,6 +57,8 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	a.client = whatsmeow.NewClient(device, waLog.Noop)
 	a.client.AddEventHandler(a.handleEvent)
+
+	slog.Info("whatsapp adapter started", slog.Int("allow_list_size", len(a.allowList)))
 
 	if a.client.Store.ID == nil {
 
@@ -132,7 +135,13 @@ func (a *Adapter) handleEvent(evt interface{}) {
 		}
 
 		if len(a.allowList) > 0 {
-			if _, ok := a.allowList[v.Info.Sender.User]; !ok {
+			sender := v.Info.Sender.User
+			if _, ok := a.allowList[sender]; !ok {
+				slog.Info("whatsapp message blocked by allow_list",
+					slog.String("sender_user", sender),
+					slog.String("sender_full", v.Info.Sender.String()),
+					slog.String("chat", v.Info.Chat.String()),
+				)
 				return
 			}
 		}
