@@ -109,8 +109,7 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 		return
 	}
 
-	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, msg.SessionID, events,
-		"Sorry, I encountered an error processing your message.")
+	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, msg.SessionID, events)
 
 	stopTyping()
 
@@ -133,7 +132,7 @@ func (cr *ChannelRouter) handleMessage(ctx context.Context, adapter channels.Ada
 	}
 }
 
-func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Logger, adapter channels.Adapter, sessionID string, events <-chan agent.TurnEvent, errorMessage string) string {
+func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Logger, adapter channels.Adapter, sessionID string, events <-chan agent.TurnEvent) string {
 	var fullResponse string
 	for ev := range events {
 		switch ev.Type {
@@ -156,7 +155,6 @@ func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Log
 				slog.String("session_id", sessionID),
 				slog.String("err", ev.Error.Error()),
 			)
-			fullResponse = errorMessage
 		}
 	}
 	return fullResponse
@@ -288,8 +286,7 @@ func (cr *ChannelRouter) RunAndDeliver(ctx context.Context, sessionID, prompt st
 		return
 	}
 
-	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, sessionID, events,
-		"Sorry, I encountered an error processing a scheduled task.")
+	fullResponse := cr.consumeTurnEvents(ctx, logger, adapter, sessionID, events)
 
 	stopTyping()
 
