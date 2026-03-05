@@ -16,6 +16,7 @@ type ServerConfig struct {
 	Command string
 	Args    []string
 	Env     map[string]string
+	URL     string // if set, use StreamableClientTransport instead of stdio
 }
 
 type serverConn struct {
@@ -53,15 +54,21 @@ func (m *Manager) Connect(ctx context.Context, cfg ServerConfig) ([]*mcpsdk.Tool
 		return nil, fmt.Errorf("mcp: server %q already connected", cfg.Name)
 	}
 
-	cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
-	if len(cfg.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range cfg.Env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	var transport mcpsdk.Transport
+	if cfg.URL != "" {
+		transport = &mcpsdk.StreamableClientTransport{
+			Endpoint: cfg.URL,
 		}
+	} else {
+		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+		if len(cfg.Env) > 0 {
+			cmd.Env = os.Environ()
+			for k, v := range cfg.Env {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+			}
+		}
+		transport = &mcpsdk.CommandTransport{Command: cmd}
 	}
-
-	transport := &mcpsdk.CommandTransport{Command: cmd}
 	session, err := m.client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("mcp: connecting to %q: %w", cfg.Name, err)

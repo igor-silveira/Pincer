@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/igorsilveira/pincer/pkg/a2a"
 	"github.com/igorsilveira/pincer/pkg/agent"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
@@ -21,21 +23,19 @@ import (
 	"github.com/igorsilveira/pincer/pkg/channels/telegram"
 	"github.com/igorsilveira/pincer/pkg/channels/webchat"
 	"github.com/igorsilveira/pincer/pkg/channels/whatsapp"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/credentials"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
-	"github.com/igorsilveira/pincer/pkg/a2a"
 	"github.com/igorsilveira/pincer/pkg/mcp"
 	"github.com/igorsilveira/pincer/pkg/memory"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 	"github.com/igorsilveira/pincer/pkg/scheduler"
 	"github.com/igorsilveira/pincer/pkg/skills"
 	"github.com/igorsilveira/pincer/pkg/soul"
 	"github.com/igorsilveira/pincer/pkg/store"
 	"github.com/igorsilveira/pincer/pkg/telemetry"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -499,8 +499,8 @@ func initMCPServers(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		if srv.Enabled != nil && !*srv.Enabled {
 			continue
 		}
-		if srv.Command == "" {
-			logger.Warn("mcp server has no command, skipping", slog.String("name", srv.Name))
+		if srv.Command == "" && srv.URL == "" {
+			logger.Warn("mcp server has no command or url, skipping", slog.String("name", srv.Name))
 			continue
 		}
 
@@ -509,6 +509,7 @@ func initMCPServers(ctx context.Context, cfg *config.Config, logger *slog.Logger
 			Command: srv.Command,
 			Args:    srv.Args,
 			Env:     srv.Env,
+			URL:     srv.URL,
 		})
 		if err != nil {
 			logger.Error("mcp server connect failed",
