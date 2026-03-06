@@ -39,6 +39,7 @@ type Tone struct {
 type Boundaries struct {
 	Refuse           []string `toml:"refuse"`
 	DisclaimerTopics []string `toml:"disclaimer_topics"`
+	Notes            []string `toml:"notes"`
 }
 
 type Expertise struct {
@@ -152,6 +153,12 @@ func (s *Soul) Render() string {
 	if len(s.Boundaries.DisclaimerTopics) > 0 {
 		fmt.Fprintf(&b, "Add disclaimers when discussing: %s.\n", strings.Join(s.Boundaries.DisclaimerTopics, ", "))
 	}
+	if len(s.Boundaries.Notes) > 0 {
+		b.WriteString("\n## Boundary Notes\n")
+		for _, n := range s.Boundaries.Notes {
+			fmt.Fprintf(&b, "- %s\n", n)
+		}
+	}
 
 	b.WriteString(operationalGuidelines)
 	b.WriteByte('\n')
@@ -204,6 +211,9 @@ func (s *Soul) Section(name string) string {
 		}
 		if len(s.Boundaries.DisclaimerTopics) > 0 {
 			parts = append(parts, fmt.Sprintf("Disclaimer topics: %s", strings.Join(s.Boundaries.DisclaimerTopics, ", ")))
+		}
+		for _, n := range s.Boundaries.Notes {
+			parts = append(parts, fmt.Sprintf("- %s", n))
 		}
 		return strings.Join(parts, "\n")
 	case "expertise":
