@@ -31,8 +31,9 @@ type Values struct {
 }
 
 type Tone struct {
-	Style     string `toml:"style"`
-	Verbosity string `toml:"verbosity"`
+	Style      string   `toml:"style"`
+	Verbosity  string   `toml:"verbosity"`
+	Guidelines []string `toml:"guidelines"`
 }
 
 type Boundaries struct {
@@ -136,6 +137,12 @@ func (s *Soul) Render() string {
 	if s.Tone.Verbosity != "" {
 		fmt.Fprintf(&b, "Verbosity: %s.\n", s.Tone.Verbosity)
 	}
+	if len(s.Tone.Guidelines) > 0 {
+		b.WriteString("\n## Communication Guidelines\n")
+		for _, g := range s.Tone.Guidelines {
+			fmt.Fprintf(&b, "- %s\n", g)
+		}
+	}
 
 	if len(s.Expertise.Domains) > 0 {
 		fmt.Fprintf(&b, "Areas of expertise: %s.\n", strings.Join(s.Expertise.Domains, ", "))
@@ -187,6 +194,9 @@ func (s *Soul) Section(name string) string {
 		}
 		if s.Tone.Verbosity != "" {
 			parts = append(parts, fmt.Sprintf("Verbosity: %s", s.Tone.Verbosity))
+		}
+		for _, g := range s.Tone.Guidelines {
+			parts = append(parts, fmt.Sprintf("- %s", g))
 		}
 		return strings.Join(parts, "\n")
 	case "boundaries":
