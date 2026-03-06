@@ -54,12 +54,20 @@ func (a *AnthropicProvider) Models() []ModelInfo {
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream"`
+	Model       string               `json:"model"`
+	MaxTokens   int                  `json:"max_tokens"`
+	System      string               `json:"system,omitempty"`
+	Messages    []anthropicMessage   `json:"messages"`
+	Tools       []anthropicTool      `json:"tools,omitempty"`
+	Stream      bool                 `json:"stream"`
+	Temperature *float64             `json:"temperature,omitempty"`
+	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
+}
+
+type anthropicToolChoice struct {
+	Type                   string `json:"type"`
+	Name                   string `json:"name,omitempty"`
+	DisableParallelToolUse *bool  `json:"disable_parallel_tool_use,omitempty"`
 }
 
 type anthropicTool struct {
@@ -108,11 +116,20 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 	}
 
 	apiReq := anthropicRequest{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    req.System,
-		Messages:  make([]anthropicMessage, 0, len(req.Messages)),
-		Stream:    req.Stream,
+		Model:       model,
+		MaxTokens:   maxTokens,
+		System:      req.System,
+		Messages:    make([]anthropicMessage, 0, len(req.Messages)),
+		Stream:      req.Stream,
+		Temperature: req.Temperature,
+	}
+
+	if req.ToolChoice != nil {
+		apiReq.ToolChoice = &anthropicToolChoice{
+			Type:                   string(req.ToolChoice.Type),
+			Name:                   req.ToolChoice.Name,
+			DisableParallelToolUse: req.ToolChoice.DisableParallelToolUse,
+		}
 	}
 
 	for _, t := range req.Tools {

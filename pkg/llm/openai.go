@@ -49,12 +49,14 @@ func (o *OpenAIProvider) Models() []ModelInfo {
 }
 
 type openaiRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openaiMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	Tools       []openaiTool    `json:"tools,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model          string          `json:"model"`
+	Messages       []openaiMessage `json:"messages"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	Temperature    *float64        `json:"temperature,omitempty"`
+	Tools          []openaiTool    `json:"tools,omitempty"`
+	Stream         bool            `json:"stream"`
+	ToolChoice     interface{}     `json:"tool_choice,omitempty"`
+	ParallelCalls  *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type openaiMessage struct {
@@ -102,6 +104,26 @@ func (o *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 		MaxTokens:   maxTokens,
 		Temperature: req.Temperature,
 		Stream:      req.Stream,
+	}
+
+	if req.ToolChoice != nil {
+		switch req.ToolChoice.Type {
+		case ToolChoiceAuto:
+			apiReq.ToolChoice = "auto"
+		case ToolChoiceNone:
+			apiReq.ToolChoice = "none"
+		case ToolChoiceAny:
+			apiReq.ToolChoice = "required"
+		case ToolChoiceTool:
+			apiReq.ToolChoice = map[string]interface{}{
+				"type":     "function",
+				"function": map[string]string{"name": req.ToolChoice.Name},
+			}
+		}
+		if req.ToolChoice.DisableParallelToolUse != nil && *req.ToolChoice.DisableParallelToolUse {
+			f := false
+			apiReq.ParallelCalls = &f
+		}
 	}
 
 	for _, t := range req.Tools {

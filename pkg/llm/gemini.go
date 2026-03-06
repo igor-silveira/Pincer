@@ -46,7 +46,17 @@ type geminiRequest struct {
 	Contents          []geminiContent  `json:"contents"`
 	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
 	Tools             []geminiToolDecl `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
 	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig *geminiFCConfig `json:"functionCallingConfig,omitempty"`
+}
+
+type geminiFCConfig struct {
+	Mode                 string   `json:"mode"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 type geminiContent struct {
@@ -122,6 +132,22 @@ func (g *GeminiProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 			})
 		}
 		apiReq.Tools = []geminiToolDecl{{FunctionDeclarations: funcs}}
+	}
+
+	if req.ToolChoice != nil {
+		switch req.ToolChoice.Type {
+		case ToolChoiceAuto:
+			apiReq.ToolConfig = &geminiToolConfig{FunctionCallingConfig: &geminiFCConfig{Mode: "AUTO"}}
+		case ToolChoiceAny:
+			apiReq.ToolConfig = &geminiToolConfig{FunctionCallingConfig: &geminiFCConfig{Mode: "ANY"}}
+		case ToolChoiceNone:
+			apiReq.ToolConfig = &geminiToolConfig{FunctionCallingConfig: &geminiFCConfig{Mode: "NONE"}}
+		case ToolChoiceTool:
+			apiReq.ToolConfig = &geminiToolConfig{FunctionCallingConfig: &geminiFCConfig{
+				Mode:                 "ANY",
+				AllowedFunctionNames: []string{req.ToolChoice.Name},
+			}}
+		}
 	}
 
 	toolCallNames := make(map[string]string)

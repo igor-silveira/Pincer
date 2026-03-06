@@ -69,6 +69,21 @@ type ChatMessage struct {
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
 }
 
+type ToolChoiceType string
+
+const (
+	ToolChoiceAuto ToolChoiceType = "auto"
+	ToolChoiceAny  ToolChoiceType = "any"
+	ToolChoiceNone ToolChoiceType = "none"
+	ToolChoiceTool ToolChoiceType = "tool"
+)
+
+type ToolChoice struct {
+	Type                    ToolChoiceType `json:"type"`
+	Name                    string         `json:"name,omitempty"`
+	DisableParallelToolUse  *bool          `json:"disable_parallel_tool_use,omitempty"`
+}
+
 type ChatRequest struct {
 	Model       string           `json:"model"`
 	Messages    []ChatMessage    `json:"messages"`
@@ -77,6 +92,7 @@ type ChatRequest struct {
 	Temperature *float64         `json:"temperature,omitempty"`
 	Stream      bool             `json:"stream"`
 	Tools       []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice  *ToolChoice      `json:"tool_choice,omitempty"`
 }
 
 type ChatEvent struct {
