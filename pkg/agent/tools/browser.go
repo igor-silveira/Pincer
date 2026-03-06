@@ -426,6 +426,7 @@ func (t *BrowserTool) doNavigate(ctx context.Context, sessionID string, params b
 
 	t.AuditLog.Log(ctx, "browser_nav", sessionID, params.URL)
 
+	browserCtx = t.waitForStableURL(sessionID, 10*time.Second)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Navigated to %s\nTitle: %s\nScreenshot: %s", loc, title, path), nil
@@ -448,9 +449,7 @@ func (t *BrowserTool) doClick(ctx context.Context, sessionID string, params brow
 		return "", fmt.Errorf("browser: click failed: %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	browserCtx = t.currentContext(sessionID)
+	browserCtx = t.waitForStableURL(sessionID, 10*time.Second)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Clicked %q\nPage: %s (%s)\nScreenshot: %s", params.Selector, loc, title, path), nil
@@ -666,9 +665,7 @@ func (t *BrowserTool) doBack(_ context.Context, sessionID string) (string, error
 		return "", fmt.Errorf("browser: back failed: %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	browserCtx = t.currentContext(sessionID)
+	browserCtx = t.waitForStableURL(sessionID, 10*time.Second)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Navigated back\nPage: %s (%s)\nScreenshot: %s", loc, title, path), nil
@@ -684,9 +681,7 @@ func (t *BrowserTool) doForward(_ context.Context, sessionID string) (string, er
 		return "", fmt.Errorf("browser: forward failed: %w", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	browserCtx = t.currentContext(sessionID)
+	browserCtx = t.waitForStableURL(sessionID, 10*time.Second)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Navigated forward\nPage: %s (%s)\nScreenshot: %s", loc, title, path), nil
@@ -713,6 +708,34 @@ func (t *BrowserTool) doClose(ctx context.Context, sessionID string) (string, er
 
 const defaultActionTimeout = 90 * time.Second
 const navigationTimeout = 3 * time.Minute
+
+func (t *BrowserTool) waitForStableURL(sessionID string, timeout time.Duration) context.Context {
+	deadline := time.Now().Add(timeout)
+	browserCtx := t.currentContext(sessionID)
+
+	var lastURL string
+	stableSince := time.Now()
+
+	for time.Now().Before(deadline) {
+		var currentURL string
+		_ = chromedp.Run(browserCtx, chromedp.Location(&currentURL))
+
+		if currentURL != lastURL {
+			lastURL = currentURL
+			stableSince = time.Now()
+			browserCtx = t.currentContext(sessionID)
+		}
+
+		if time.Since(stableSince) >= 1*time.Second {
+			return browserCtx
+		}
+
+		time.Sleep(200 * time.Millisecond)
+		browserCtx = t.currentContext(sessionID)
+	}
+
+	return browserCtx
+}
 
 func (t *BrowserTool) runWithTimeout(browserCtx context.Context, timeout time.Duration, actions ...chromedp.Action) error {
 	ctx, cancel := context.WithTimeout(browserCtx, timeout)
