@@ -66,7 +66,7 @@ func (r *Runtime) CompactSession(ctx context.Context, sessionID string) error {
 
 	var conv strings.Builder
 	for _, m := range oldMessages {
-		if m.ContentType == store.ContentTypeText && strings.HasPrefix(m.Content, "[Session Summary]") {
+		if m.ContentType == store.ContentTypeText && strings.HasPrefix(m.Content, "[Session Summary]\n") {
 			fmt.Fprintf(&conv, "[Previous Summary]: %s\n\n", m.Content[len("[Session Summary]\n"):])
 			continue
 		}
