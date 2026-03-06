@@ -16,10 +16,11 @@ const openaiAPIURL = "https://api.openai.com/v1/chat/completions"
 type OpenAIProvider struct {
 	apiKey     string
 	baseURL    string
+	authHeader string
 	httpClient *http.Client
 }
 
-func NewOpenAIProvider(apiKey, baseURL string) (*OpenAIProvider, error) {
+func NewOpenAIProvider(apiKey, baseURL, authHeader string) (*OpenAIProvider, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
@@ -29,9 +30,13 @@ func NewOpenAIProvider(apiKey, baseURL string) (*OpenAIProvider, error) {
 	if baseURL == "" {
 		baseURL = openaiAPIURL
 	}
+	if authHeader == "" {
+		authHeader = "Authorization"
+	}
 	return &OpenAIProvider{
 		apiKey:     apiKey,
 		baseURL:    baseURL,
+		authHeader: authHeader,
 		httpClient: &http.Client{},
 	}, nil
 }
@@ -148,8 +153,12 @@ func (o *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 		)
 	}
 
+	authValue := o.apiKey
+	if o.authHeader == "Authorization" {
+		authValue = "Bearer " + o.apiKey
+	}
 	resp, err := doLLMRequest(ctx, o.httpClient, "openai", o.baseURL, map[string]string{
-		"Authorization": "Bearer " + o.apiKey,
+		o.authHeader: authValue,
 	}, apiReq)
 	if err != nil {
 		return nil, err

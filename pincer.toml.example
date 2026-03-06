@@ -7,6 +7,7 @@ port = 18789
 model = "claude-sonnet-4-20250514"
 # api_key_env = ""
 # base_url = ""
+# auth_header = ""
 # fallback_models = ["gpt-4o", "gemini-2.0-flash"]
 max_context_tokens = 128000
 max_tool_iterations = 25

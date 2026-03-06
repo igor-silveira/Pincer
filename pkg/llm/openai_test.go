@@ -15,7 +15,7 @@ func TestNewOpenAIProvider_NoKey(t *testing.T) {
 	os.Unsetenv("OPENAI_API_KEY")
 	defer os.Setenv("OPENAI_API_KEY", orig)
 
-	_, err := NewOpenAIProvider("", "")
+	_, err := NewOpenAIProvider("", "", "")
 	if err == nil {
 		t.Error("expected error when no API key")
 	}
@@ -36,7 +36,7 @@ func TestOpenAIChat_FullResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewOpenAIProvider("test-key", srv.URL)
+	p, err := NewOpenAIProvider("test-key", srv.URL, "")
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestOpenAIChat_ToolCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewOpenAIProvider("test-key", srv.URL)
+	p, err := NewOpenAIProvider("test-key", srv.URL, "")
 	if err != nil {
 		t.Fatalf("NewOpenAIProvider: %v", err)
 	}

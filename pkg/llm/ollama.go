@@ -24,7 +24,7 @@ func NewOllamaProvider(baseURL, model string) (*OllamaProvider, error) {
 		model = "llama3"
 	}
 
-	inner, err := NewOpenAIProvider("ollama", baseURL)
+	inner, err := NewOpenAIProvider("ollama", baseURL, "")
 	if err != nil {
 		return nil, fmt.Errorf("ollama: creating provider: %w", err)
 	}

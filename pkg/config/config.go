@@ -43,6 +43,7 @@ type AgentConfig struct {
 	SystemPrompt      string      `toml:"system_prompt"`
 	ToolConcurrency   int         `toml:"tool_concurrency"`
 	ToolTimeout       string      `toml:"tool_timeout"`
+	AuthHeader        string      `toml:"auth_header"`
 	Retry             RetryConfig        `toml:"retry"`
 	Checkpoint        CheckpointConfig   `toml:"checkpoint"`
 	Verification      VerificationConfig `toml:"verification"`

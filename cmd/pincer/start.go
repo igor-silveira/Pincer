@@ -476,11 +476,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 func createProvider(cfg *config.Config, logger *slog.Logger) (llm.Provider, error) {
 	model := cfg.Agent.Model
 
+	authHeader := cfg.Agent.AuthHeader
+
 	switch {
 	case hasPrefix(model, "claude-"):
-		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL)
+		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL, authHeader)
 	case hasPrefix(model, "gpt-") || hasPrefix(model, "o3-") || hasPrefix(model, "o4-"):
-		return llm.NewOpenAIProvider("", "")
+		return llm.NewOpenAIProvider("", "", authHeader)
 	case hasPrefix(model, "gemini-"):
 		return llm.NewGeminiProvider("")
 	case hasPrefix(model, "ollama/"):
@@ -488,7 +490,7 @@ func createProvider(cfg *config.Config, logger *slog.Logger) (llm.Provider, erro
 	default:
 
 		logger.Info("defaulting to anthropic provider", slog.String("model", model))
-		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL)
+		return llm.NewAnthropicProvider(os.Getenv(cfg.Agent.APIKeyEnv), cfg.Agent.BaseURL, authHeader)
 	}
 }
 

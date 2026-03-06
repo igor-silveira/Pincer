@@ -21,10 +21,11 @@ const (
 type AnthropicProvider struct {
 	apiKey     string
 	baseURL    string
+	authHeader string
 	httpClient *http.Client
 }
 
-func NewAnthropicProvider(apiKey, baseURL string) (*AnthropicProvider, error) {
+func NewAnthropicProvider(apiKey, baseURL, authHeader string) (*AnthropicProvider, error) {
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
@@ -34,9 +35,13 @@ func NewAnthropicProvider(apiKey, baseURL string) (*AnthropicProvider, error) {
 	if apiKey == "" && baseURL == anthropicDefaultBaseURL {
 		return nil, fmt.Errorf("anthropic: API key not set (provide it or set ANTHROPIC_API_KEY)")
 	}
+	if authHeader == "" {
+		authHeader = "X-Api-Key"
+	}
 	return &AnthropicProvider{
 		apiKey:     apiKey,
 		baseURL:    baseURL,
+		authHeader: authHeader,
 		httpClient: &http.Client{},
 	}, nil
 }
@@ -144,7 +149,7 @@ func (a *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan C
 	}
 
 	resp, err := doLLMRequest(ctx, a.httpClient, "anthropic", a.baseURL+anthropicMessagesPath, map[string]string{
-		"X-Api-Key":         a.apiKey,
+		a.authHeader:        a.apiKey,
 		"Anthropic-Version": anthropicAPIVersion,
 	}, apiReq)
 	if err != nil {

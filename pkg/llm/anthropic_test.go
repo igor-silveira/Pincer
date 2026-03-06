@@ -16,14 +16,14 @@ func TestNewAnthropicProvider_NoKey(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 	defer os.Setenv("ANTHROPIC_API_KEY", orig)
 
-	_, err := NewAnthropicProvider("", "")
+	_, err := NewAnthropicProvider("", "", "")
 	if err == nil {
 		t.Error("expected error when no API key and default base URL")
 	}
 }
 
 func TestNewAnthropicProvider_CustomBase(t *testing.T) {
-	p, err := NewAnthropicProvider("", "http://localhost:9999")
+	p, err := NewAnthropicProvider("", "http://localhost:9999", "")
 	if err != nil {
 		t.Fatalf("unexpected error with custom base URL: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestAnthropicChat_FullResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewAnthropicProvider("test-key", srv.URL)
+	p, err := NewAnthropicProvider("test-key", srv.URL, "")
 	if err != nil {
 		t.Fatalf("NewAnthropicProvider: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestAnthropicChat_StreamResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := NewAnthropicProvider("test-key", srv.URL)
+	p, err := NewAnthropicProvider("test-key", srv.URL, "")
 	if err != nil {
 		t.Fatalf("NewAnthropicProvider: %v", err)
 	}

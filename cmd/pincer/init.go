@@ -285,9 +285,9 @@ func testConnectivity(chosen providerOption) {
 
 	switch chosen.envVar {
 	case "ANTHROPIC_API_KEY":
-		provider, err = llm.NewAnthropicProvider("", "")
+		provider, err = llm.NewAnthropicProvider("", "", "")
 	case "OPENAI_API_KEY":
-		provider, err = llm.NewOpenAIProvider("", "")
+		provider, err = llm.NewOpenAIProvider("", "", "")
 	case "GEMINI_API_KEY":
 		provider, err = llm.NewGeminiProvider("")
 	}
