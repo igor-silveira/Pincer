@@ -138,7 +138,29 @@ func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Log
 		switch ev.Type {
 		case agent.TurnApprovalNeeded:
 			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
-		case agent.TurnProgress, agent.TurnToolStart:
+		case agent.TurnToolStart:
+			if pr, ok := adapter.(channels.ProgressRenderer); ok {
+				name := ""
+				if ev.ToolCall != nil {
+					name = ev.ToolCall.Name
+				}
+				_ = pr.SendProgress(ctx, sessionID, channels.ToolProgress{
+					ToolName: name,
+					Phase:    channels.PhaseRunning,
+					Message:  ev.Message,
+				})
+			} else {
+				if err := adapter.Send(ctx, channels.OutboundMessage{
+					SessionID: sessionID,
+					Content:   ev.Message,
+				}); err != nil {
+					logger.Debug("failed to send tool start",
+						slog.String("session_id", sessionID),
+						slog.String("err", err.Error()),
+					)
+				}
+			}
+		case agent.TurnProgress:
 			if err := adapter.Send(ctx, channels.OutboundMessage{
 				SessionID: sessionID,
 				Content:   ev.Message,

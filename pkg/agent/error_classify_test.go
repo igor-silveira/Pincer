@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/igorsilveira/pincer/pkg/agent/executor"
 	"github.com/igorsilveira/pincer/pkg/llm"
 )
 
@@ -12,24 +13,24 @@ func TestClassifyToolError(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		want llm.ToolErrorKind
+		want executor.ErrorKind
 	}{
-		{"deadline exceeded", context.DeadlineExceeded, llm.ToolErrorTransient},
-		{"canceled", context.Canceled, llm.ToolErrorTransient},
-		{"timeout in message", fmt.Errorf("command timeout after 30s"), llm.ToolErrorTransient},
-		{"temporary in message", fmt.Errorf("temporary failure"), llm.ToolErrorTransient},
-		{"connection refused", fmt.Errorf("dial tcp: connection refused"), llm.ToolErrorTransient},
-		{"wrapped deadline", fmt.Errorf("tool exec: %w", context.DeadlineExceeded), llm.ToolErrorTransient},
-		{"permission denied", fmt.Errorf("permission denied"), llm.ToolErrorPermanent},
-		{"not found", fmt.Errorf("file not found"), llm.ToolErrorPermanent},
-		{"generic error", fmt.Errorf("something broke"), llm.ToolErrorPermanent},
+		{"deadline exceeded", context.DeadlineExceeded, executor.Transient},
+		{"canceled", context.Canceled, executor.Transient},
+		{"timeout in message", fmt.Errorf("command timeout after 30s"), executor.Transient},
+		{"temporary in message", fmt.Errorf("temporary failure"), executor.Transient},
+		{"connection refused", fmt.Errorf("dial tcp: connection refused"), executor.Transient},
+		{"wrapped deadline", fmt.Errorf("tool exec: %w", context.DeadlineExceeded), executor.Transient},
+		{"permission denied", fmt.Errorf("permission denied"), executor.Permanent},
+		{"not found", fmt.Errorf("file not found"), executor.Permanent},
+		{"generic error", fmt.Errorf("something broke"), executor.Permanent},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyToolError(tt.err)
+			got := executor.ClassifyError(tt.err)
 			if got != tt.want {
-				t.Errorf("classifyToolError(%v) = %d, want %d", tt.err, got, tt.want)
+				t.Errorf("ClassifyError(%v) = %d, want %d", tt.err, got, tt.want)
 			}
 		})
 	}

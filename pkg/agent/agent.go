@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/igorsilveira/pincer/pkg/agent/executor"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/config"
@@ -126,6 +126,9 @@ type Runtime struct {
 	memoryHashes     map[string]map[string]string
 	sessionMu        sync.Mutex
 	sessionLocks     map[string]*sync.Mutex
+	executor         *executor.Executor
+	recovery         executor.RecoveryStrategy
+	toolTimeout      time.Duration
 }
 
 type RuntimeConfig struct {
@@ -142,6 +145,9 @@ type RuntimeConfig struct {
 	Memory           *memory.Store
 	Audit            *audit.Logger
 	DefaultPolicy    sandbox.Policy
+	Executor         *executor.Executor
+	Recovery         executor.RecoveryStrategy
+	ToolTimeout      time.Duration
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -156,6 +162,22 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	}
 	if cfg.SystemPrompt == "" {
 		cfg.SystemPrompt = defaultSystemPrompt
+	}
+	exec := cfg.Executor
+	if exec == nil {
+		exec = executor.New(config.DefaultToolConcurrency)
+	}
+	recov := cfg.Recovery
+	if recov == nil {
+		recov = &executor.DefaultRecovery{
+			MaxRetries: config.DefaultRecoveryRetries,
+			BaseDelay:  config.RecoveryBaseDelay,
+			MaxDelay:   config.RecoveryMaxDelay,
+		}
+	}
+	toolTimeout := cfg.ToolTimeout
+	if toolTimeout == 0 {
+		toolTimeout = config.DefaultToolTimeout
 	}
 	return &Runtime{
 		provider:        cfg.Provider,
@@ -174,6 +196,9 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		ctxBuilder:      NewContextBuilder(cfg.MaxTokens, cfg.MaxOutputTokens),
 		memoryHashes:    make(map[string]map[string]string),
 		sessionLocks:    make(map[string]*sync.Mutex),
+		executor:        exec,
+		recovery:        recov,
+		toolTimeout:     toolTimeout,
 	}
 }
 
@@ -388,38 +413,79 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 
 		toolResults := make([]llm.ToolResult, len(toolCalls))
 		toolNames := make([]string, len(toolCalls))
-		var wg sync.WaitGroup
+		tasks := make([]executor.Task, len(toolCalls))
 		for i, tc := range toolCalls {
 			toolNames[i] = tc.Name
-			wg.Add(1)
-			go func(idx int, tc llm.ToolCall) {
-				defer wg.Done()
-				out <- TurnEvent{Type: TurnToolStart, Message: fmt.Sprintf("Running %s...", tc.Name), ToolCall: &tc}
-				toolResults[idx] = r.executeTool(ctx, logger, sessionID, tc, out)
-				msg := fmt.Sprintf("%s completed", tc.Name)
-				if toolResults[idx].IsError {
-					msg = fmt.Sprintf("%s failed: %s", tc.Name, truncate(toolResults[idx].Content, config.ToolResultTruncateLen))
-				}
-				out <- TurnEvent{Type: TurnToolResult, Message: msg}
-			}(i, tc)
-		}
-		wg.Wait()
-
-		for i, result := range toolResults {
-			if result.IsError && result.ErrorKind() == llm.ToolErrorTransient {
-				logger.Info("retrying transient tool error",
-					slog.String("tool", toolCalls[i].Name),
-					slog.String("original_error", truncate(result.Content, config.ErrorTruncateLen)),
-				)
-				out <- TurnEvent{Type: TurnToolStart, Message: fmt.Sprintf("Retrying %s...", toolCalls[i].Name), ToolCall: &toolCalls[i]}
-				retried := r.executeTool(ctx, logger, sessionID, toolCalls[i], out)
-				toolResults[i] = retried
-				msg := fmt.Sprintf("%s retry completed", toolCalls[i].Name)
-				if retried.IsError {
-					msg = fmt.Sprintf("%s retry failed: %s", toolCalls[i].Name, truncate(retried.Content, config.ToolResultTruncateLen))
-				}
-				out <- TurnEvent{Type: TurnToolResult, Message: msg}
+			tc := tc
+			idx := i
+			tasks[i] = executor.Task{
+				ID: tc.ID,
+				Fn: func(ctx context.Context) (string, error) {
+					result := r.executeTool(ctx, logger, sessionID, tc, out)
+					toolResults[idx] = result
+					if result.IsError {
+						return result.Content, fmt.Errorf("%s", result.Content)
+					}
+					return result.Content, nil
+				},
+				Timeout: r.toolTimeout,
+				OnStart: func() {
+					out <- TurnEvent{Type: TurnToolStart, Message: fmt.Sprintf("Running %s...", tc.Name), ToolCall: &tc}
+				},
+				OnDone: func(res executor.Result) {
+					msg := fmt.Sprintf("%s completed", tc.Name)
+					if res.Err != nil {
+						msg = fmt.Sprintf("%s failed: %s", tc.Name, truncate(res.Err.Error(), config.ToolResultTruncateLen))
+					}
+					out <- TurnEvent{Type: TurnToolResult, Message: msg}
+				},
 			}
+		}
+
+		batch := r.executor.RunBatch(ctx, tasks)
+
+		var replanSummary executor.ErrorSummary
+		for i, res := range batch.Results {
+			if res.Err == nil {
+				continue
+			}
+			attempts := 0
+			for {
+				action := r.recovery.Decide(res, attempts)
+				if action == executor.ActionRetry {
+					delay := r.recovery.Backoff(attempts)
+					logger.Info("retrying tool with backoff",
+						slog.String("tool", toolCalls[i].Name),
+						slog.Duration("delay", delay),
+						slog.Int("attempt", attempts+1),
+					)
+					out <- TurnEvent{Type: TurnToolStart, Message: fmt.Sprintf("Retrying %s...", toolCalls[i].Name), ToolCall: &toolCalls[i]}
+					select {
+					case <-ctx.Done():
+						res = executor.Result{ID: res.ID, Err: ctx.Err()}
+					case <-time.After(delay):
+						retryBatch := r.executor.RunBatch(ctx, []executor.Task{tasks[i]})
+						res = retryBatch.Results[0]
+					}
+					attempts++
+					if res.Err == nil {
+						break
+					}
+					continue
+				}
+				if action == executor.ActionReplan {
+					replanSummary.FailedTools = append(replanSummary.FailedTools, executor.FailedToolInfo{
+						Name:    toolCalls[i].Name,
+						Error:   truncate(res.Err.Error(), config.ErrorTruncateLen),
+						Retries: attempts,
+					})
+				}
+				break
+			}
+		}
+
+		if len(replanSummary.FailedTools) > 0 {
+			ephemeralContext = replanSummary.String()
 		}
 
 		if err := r.persistToolResultMessage(ctx, sessionID, toolResults); err != nil {
@@ -705,16 +771,30 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 		}
 		messages = append(messages, assistantMsg)
 
-		var toolResults []llm.ToolResult
-		for _, tc := range toolCalls {
-			policy := r.defaultPolicy
-			if policy.Timeout == 0 {
-				policy = sandbox.DefaultPolicy()
+		toolResults := make([]llm.ToolResult, len(toolCalls))
+		subTasks := make([]executor.Task, len(toolCalls))
+		for i, tc := range toolCalls {
+			tc := tc
+			idx := i
+			subTasks[i] = executor.Task{
+				ID: tc.ID,
+				Fn: func(ctx context.Context) (string, error) {
+					policy := r.defaultPolicy
+					if policy.Timeout == 0 {
+						policy = sandbox.DefaultPolicy()
+					}
+					policy.RequireApproval = false
+					result := runTool(ctx, logger, tc, registry, r.sandbox, policy)
+					toolResults[idx] = result
+					if result.IsError {
+						return result.Content, fmt.Errorf("%s", result.Content)
+					}
+					return result.Content, nil
+				},
+				Timeout: r.toolTimeout,
 			}
-			policy.RequireApproval = false
-			result := runTool(ctx, logger, tc, registry, r.sandbox, policy)
-			toolResults = append(toolResults, result)
 		}
+		r.executor.RunBatch(ctx, subTasks)
 
 		messages = append(messages, llm.ChatMessage{
 			Role:        llm.RoleUser,
@@ -736,17 +816,6 @@ func (r *Runtime) buildSubagentContext(ctx context.Context, agentID, sessionID s
 	}
 
 	return systemPrompt
-}
-
-func classifyToolError(err error) llm.ToolErrorKind {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return llm.ToolErrorTransient
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "timeout") || strings.Contains(msg, "temporary") || strings.Contains(msg, "connection refused") {
-		return llm.ToolErrorTransient
-	}
-	return llm.ToolErrorPermanent
 }
 
 func runTool(ctx context.Context, logger *slog.Logger, tc llm.ToolCall, registry *tools.Registry, sb sandbox.Sandbox, policy sandbox.Policy) llm.ToolResult {
@@ -790,7 +859,12 @@ func runTool(ctx context.Context, logger *slog.Logger, tc llm.ToolCall, registry
 			Content:    fmt.Sprintf("error: %v", err),
 			IsError:    true,
 		}
-		result.SetErrorKind(classifyToolError(err))
+		kind := executor.ClassifyError(err)
+		if kind == executor.Transient {
+			result.SetErrorKind(llm.ToolErrorTransient)
+		} else {
+			result.SetErrorKind(llm.ToolErrorPermanent)
+		}
 		return result
 	}
 
