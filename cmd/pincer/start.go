@@ -29,6 +29,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/channels/whatsapp"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/credentials"
+	"github.com/igorsilveira/pincer/pkg/filecache"
 	"github.com/igorsilveira/pincer/pkg/gateway"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/mcp"
@@ -128,7 +129,10 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 	}
 	logger.Info("tool sandbox ready", slog.String("mode", cfg.Sandbox.Mode))
 
-	registry := tools.DefaultRegistry()
+	fc := filecache.New()
+	fc.Start(ctx)
+
+	registry := tools.DefaultRegistry(fc)
 	registry.Register(&tools.MemoryTool{Memory: deps.mem})
 	registry.Register(&tools.SoulTool{Soul: soulDef})
 	if deps.credStore != nil {

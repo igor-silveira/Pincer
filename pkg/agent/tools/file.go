@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"unicode/utf8"
 
+	"github.com/igorsilveira/pincer/pkg/filecache"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
 
-type FileReadTool struct{}
+type FileReadTool struct {
+	Cache *filecache.Cache
+}
 
 type fileReadInput struct {
 	Path string `json:"path"`
@@ -58,7 +61,12 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage, sb sa
 		return "", fmt.Errorf("file_read: %w", err)
 	}
 
-	data, err := os.ReadFile(path)
+	var data []byte
+	if t.Cache != nil {
+		data, err = t.Cache.Get(path)
+	} else {
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return "", fmt.Errorf("file_read: %w", err)
 	}
@@ -78,7 +86,9 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage, sb sa
 	return content, nil
 }
 
-type FileWriteTool struct{}
+type FileWriteTool struct {
+	Cache *filecache.Cache
+}
 
 type fileWriteInput struct {
 	Path    string `json:"path"`
@@ -157,6 +167,10 @@ func (t *FileWriteTool) Execute(ctx context.Context, input json.RawMessage, sb s
 	n, err := f.WriteString(params.Content)
 	if err != nil {
 		return "", fmt.Errorf("file_write: %w", err)
+	}
+
+	if t.Cache != nil {
+		t.Cache.Invalidate(path)
 	}
 
 	return fmt.Sprintf("wrote %d bytes to %s", n, path), nil

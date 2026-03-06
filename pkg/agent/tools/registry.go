@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/igorsilveira/pincer/pkg/filecache"
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
 )
@@ -91,11 +92,11 @@ func (r *Registry) Without(names []string) *Registry {
 	return filtered
 }
 
-func DefaultRegistry() *Registry {
+func DefaultRegistry(fc *filecache.Cache) *Registry {
 	r := NewRegistry()
 	r.Register(&ShellTool{})
-	r.Register(&FileReadTool{})
-	r.Register(&FileWriteTool{})
+	r.Register(&FileReadTool{Cache: fc})
+	r.Register(&FileWriteTool{Cache: fc})
 	r.Register(&HTTPTool{})
 	return r
 }

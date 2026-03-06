@@ -105,7 +105,7 @@ func TestRegistry_UnregisterNonExistent(t *testing.T) {
 }
 
 func TestDefaultRegistry_ContainsExpected(t *testing.T) {
-	r := DefaultRegistry()
+	r := DefaultRegistry(nil)
 	expected := []string{"shell", "file_read", "file_write", "http_request"}
 	for _, name := range expected {
 		if _, err := r.Get(name); err != nil {
@@ -115,7 +115,7 @@ func TestDefaultRegistry_ContainsExpected(t *testing.T) {
 }
 
 func TestDefaultRegistry_Count(t *testing.T) {
-	r := DefaultRegistry()
+	r := DefaultRegistry(nil)
 	defs := r.Definitions()
 	if len(defs) != 4 {
 		t.Errorf("DefaultRegistry has %d tools, want 4", len(defs))
