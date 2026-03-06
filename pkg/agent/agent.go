@@ -16,6 +16,7 @@ import (
 	"github.com/igorsilveira/pincer/pkg/agent/executor"
 	"github.com/igorsilveira/pincer/pkg/agent/retry"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/agent/verification"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/config"
 	"github.com/igorsilveira/pincer/pkg/llm"
@@ -131,8 +132,9 @@ type Runtime struct {
 	executor         *executor.Executor
 	recovery         executor.RecoveryStrategy
 	toolTimeout      time.Duration
-	retryStrategies  []retry.Strategy
-	checkpointMgr    *checkpoint.Manager
+	retryStrategies    []retry.Strategy
+	checkpointMgr      *checkpoint.Manager
+	verificationRunner *verification.Runner
 }
 
 type RuntimeConfig struct {
@@ -152,8 +154,9 @@ type RuntimeConfig struct {
 	Executor         *executor.Executor
 	Recovery         executor.RecoveryStrategy
 	ToolTimeout      time.Duration
-	RetryStrategies  []retry.Strategy
-	CheckpointMgr   *checkpoint.Manager
+	RetryStrategies    []retry.Strategy
+	CheckpointMgr     *checkpoint.Manager
+	VerificationRunner *verification.Runner
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -205,8 +208,9 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		executor:        exec,
 		recovery:        recov,
 		toolTimeout:     toolTimeout,
-		retryStrategies: cfg.RetryStrategies,
-		checkpointMgr:   cfg.CheckpointMgr,
+		retryStrategies:    cfg.RetryStrategies,
+		checkpointMgr:      cfg.CheckpointMgr,
+		verificationRunner: cfg.VerificationRunner,
 	}
 }
 
@@ -412,6 +416,27 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting assistant message: %w", err)}
 				return
 			}
+
+			// Run verification gates if configured
+			if r.verificationRunner != nil {
+				tr := verification.TaskResult{
+					SessionID:    sessionID,
+					FinalMessage: string(textContent),
+				}
+				vResult := r.verificationRunner.Run(ctx, tr)
+				if vResult.Status == verification.Failed {
+					logger.Info("verification gate failed, retrying",
+						slog.String("reason", vResult.Reason),
+					)
+					ephemeralContext = fmt.Sprintf(
+						"Your previous response failed verification: %s. Please try a different approach.",
+						vResult.Reason,
+					)
+					out <- TurnEvent{Type: TurnProgress, Message: "Verification failed, retrying..."}
+					continue // next iteration of the agentic loop
+				}
+			}
+
 			out <- TurnEvent{Type: TurnDone, Message: string(textContent), Usage: usage}
 			return
 		}
