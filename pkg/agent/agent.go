@@ -133,6 +133,7 @@ type Runtime struct {
 	recovery         executor.RecoveryStrategy
 	toolTimeout      time.Duration
 	retryStrategies    []retry.Strategy
+	retryCooldown      time.Duration
 	checkpointMgr      *checkpoint.Manager
 	verificationRunner *verification.Runner
 }
@@ -155,6 +156,7 @@ type RuntimeConfig struct {
 	Recovery         executor.RecoveryStrategy
 	ToolTimeout      time.Duration
 	RetryStrategies    []retry.Strategy
+	RetryCooldown      time.Duration
 	CheckpointMgr     *checkpoint.Manager
 	VerificationRunner *verification.Runner
 }
@@ -209,6 +211,7 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		recovery:        recov,
 		toolTimeout:     toolTimeout,
 		retryStrategies:    cfg.RetryStrategies,
+		retryCooldown:      cfg.RetryCooldown,
 		checkpointMgr:      cfg.CheckpointMgr,
 		verificationRunner: cfg.VerificationRunner,
 	}
@@ -315,6 +318,16 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 	var verificationAttempts int
 	var lastCheckpointTokens int
 	var ephemeralContext string
+	var allToolsUsed []string
+
+	// Extract the original user prompt from the most recent user message.
+	var originalPrompt string
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == llm.RoleUser && history[i].ContentType != store.ContentTypeToolResults {
+			originalPrompt = history[i].Content
+			break
+		}
+	}
 
 	var rotator *retry.Rotator
 	if len(r.retryStrategies) > 0 {
@@ -430,6 +443,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				tr := verification.TaskResult{
 					SessionID:    sessionID,
 					FinalMessage: string(textContent),
+					ToolsUsed:    allToolsUsed,
 				}
 				vResult := r.verificationRunner.Run(ctx, tr)
 				if vResult.Status == verification.Failed {
@@ -501,6 +515,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		}
 
 		batch := r.executor.RunBatch(ctx, tasks)
+		allToolsUsed = append(allToolsUsed, toolNames...)
 
 		var replanSummary executor.ErrorSummary
 		for i, res := range batch.Results {
@@ -545,8 +560,9 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		if len(replanSummary.FailedTools) > 0 {
 			if rotator != nil {
 				tc := retry.TaskContext{
-					SessionID: sessionID,
-					Iteration: iteration,
+					OriginalPrompt: originalPrompt,
+					SessionID:      sessionID,
+					Iteration:      iteration,
 				}
 				errs := make([]error, len(replanSummary.FailedTools))
 				for i, f := range replanSummary.FailedTools {
@@ -558,6 +574,13 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 						slog.String("strategy", s.Name()),
 						slog.Int("iteration", iteration),
 					)
+					if r.retryCooldown > 0 {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(r.retryCooldown):
+						}
+					}
 				} else {
 					ephemeralContext = replanSummary.String()
 				}

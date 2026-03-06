@@ -217,7 +217,9 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		for _, name := range cfg.Agent.Verification.Gates {
 			switch name {
 			case "llm_self_check":
-				gates = append(gates, &verification.LLMSelfCheckGate{})
+				gates = append(gates, &verification.LLMSelfCheckGate{
+					LLM: &providerLLMChecker{provider: provider, model: cfg.Agent.Model},
+				})
 			}
 		}
 		if len(gates) > 0 {
@@ -250,6 +252,7 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		Recovery:          recovery,
 		ToolTimeout:        toolTimeout,
 		RetryStrategies:    retryStrategies,
+		RetryCooldown:      time.Duration(cfg.Agent.Retry.CooldownMS) * time.Millisecond,
 		CheckpointMgr:     checkpointMgr,
 		VerificationRunner: verificationRunner,
 	})
@@ -258,6 +261,33 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
 
 	return runtime, registry, approver, soulDef, nil
+}
+
+// providerLLMChecker adapts an llm.Provider into a verification.LLMChecker.
+type providerLLMChecker struct {
+	provider llm.Provider
+	model    string
+}
+
+func (p *providerLLMChecker) Check(ctx context.Context, prompt string) (string, error) {
+	events, err := p.provider.Chat(ctx, llm.ChatRequest{
+		Model: p.model,
+		Messages: []llm.ChatMessage{
+			{Role: llm.RoleUser, Content: prompt},
+		},
+		MaxTokens: 256,
+	})
+	if err != nil {
+		return "", err
+	}
+	var result string
+	for ev := range events {
+		if ev.Error != nil {
+			return "", ev.Error
+		}
+		result += ev.Token
+	}
+	return result, nil
 }
 
 func buildRetryStrategies(cfg config.RetryConfig) []retry.Strategy {
