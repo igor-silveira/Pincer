@@ -14,8 +14,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/igorsilveira/pincer/pkg/a2a"
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/agent/checkpoint"
 	"github.com/igorsilveira/pincer/pkg/agent/executor"
+	"github.com/igorsilveira/pincer/pkg/agent/retry"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
+	"github.com/igorsilveira/pincer/pkg/agent/verification"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
 	"github.com/igorsilveira/pincer/pkg/channels/discord"
@@ -196,6 +199,40 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		slog.String("timeout", toolTimeout.String()),
 	)
 
+	retryStrategies := buildRetryStrategies(cfg.Agent.Retry)
+
+	var checkpointMgr *checkpoint.Manager
+	if cfg.Agent.Checkpoint.Enabled {
+		checkpointMgr = &checkpoint.Manager{
+			TokenThreshold: cfg.Agent.Checkpoint.TokenThreshold,
+		}
+		logger.Info("checkpoint system enabled",
+			slog.Int("token_threshold", cfg.Agent.Checkpoint.TokenThreshold),
+		)
+	}
+
+	var verificationRunner *verification.Runner
+	if cfg.Agent.Verification.Enabled {
+		var gates []verification.Gate
+		for _, name := range cfg.Agent.Verification.Gates {
+			switch name {
+			case "llm_self_check":
+				gates = append(gates, &verification.LLMSelfCheckGate{})
+			}
+		}
+		if len(gates) > 0 {
+			verificationRunner = verification.NewRunner(
+				gates,
+				cfg.Agent.Verification.ConfidenceThreshold,
+				cfg.Agent.Verification.MaxAttempts,
+			)
+			logger.Info("verification gates enabled",
+				slog.Int("gates", len(gates)),
+				slog.Float64("confidence_threshold", cfg.Agent.Verification.ConfidenceThreshold),
+			)
+		}
+	}
+
 	runtime := agent.NewRuntime(agent.RuntimeConfig{
 		Provider:          provider,
 		Store:             deps.db,
@@ -211,13 +248,35 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		DefaultPolicy:     buildDefaultPolicy(cfg),
 		Executor:          exec,
 		Recovery:          recovery,
-		ToolTimeout:       toolTimeout,
+		ToolTimeout:        toolTimeout,
+		RetryStrategies:    retryStrategies,
+		CheckpointMgr:     checkpointMgr,
+		VerificationRunner: verificationRunner,
 	})
 
 	_ = deps.auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",
 		fmt.Sprintf("pincer started version=%s provider=%s sandbox=%s", version, provider.Name(), cfg.Sandbox.Mode))
 
 	return runtime, registry, approver, soulDef, nil
+}
+
+func buildRetryStrategies(cfg config.RetryConfig) []retry.Strategy {
+	var strategies []retry.Strategy
+	for _, name := range cfg.Strategies {
+		switch name {
+		case "tool_swap":
+			strategies = append(strategies, &retry.ToolSwap{
+				Alternatives: map[string]string{
+					"http_request": "browser",
+				},
+			})
+		case "decompose":
+			strategies = append(strategies, &retry.Decompose{MinPromptLen: 50})
+		case "rephrase":
+			strategies = append(strategies, &retry.Rephrase{})
+		}
+	}
+	return strategies
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
@@ -289,6 +348,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 	webhooks := scheduler.NewWebhookHandler(webhookSecret)
 
 	sched := scheduler.New()
+	if cfg.Agent.Checkpoint.Enabled {
+		_ = sched.Add(scheduler.Job{
+			Name:     "checkpoint-gc",
+			Schedule: "@daily",
+			Func: func(ctx context.Context) error {
+				cutoff := time.Now().Add(-time.Duration(cfg.Agent.Checkpoint.RetentionHours) * time.Hour)
+				deleted, err := deps.db.DeleteCheckpointsOlderThan(ctx, cutoff)
+				if err != nil {
+					return err
+				}
+				telemetry.FromContext(ctx).Info("checkpoint gc", slog.Int64("deleted", deleted))
+				return nil
+			},
+		})
+	}
 	go sched.Start(ctx)
 
 	chat := webchat.New()
