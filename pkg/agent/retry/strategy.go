@@ -23,6 +23,9 @@ type Strategy interface {
 }
 
 // Rotator cycles through strategies by priority, tracking which have been tried.
+//
+// Rotator is not safe for concurrent use. Callers must synchronise access
+// externally if a Rotator is shared across goroutines.
 type Rotator struct {
 	strategies  []Strategy
 	maxAttempts int
@@ -45,24 +48,27 @@ func NewRotator(strategies []Strategy, maxAttempts int) *Rotator {
 	}
 }
 
-// Next returns the next applicable strategy, or nil if all strategies have been
-// exhausted or maxAttempts has been reached.
-func (r *Rotator) Next(task TaskContext, errs []error) Strategy {
+// Next returns the next applicable strategy along with its ReframedTask, or
+// (nil, nil) if all strategies have been exhausted or maxAttempts has been
+// reached. Returning the ReframedTask avoids a redundant second call to
+// Reframe by the caller.
+func (r *Rotator) Next(task TaskContext, errs []error) (Strategy, *ReframedTask) {
 	if r.attempts >= r.maxAttempts {
-		return nil
+		return nil, nil
 	}
 	for _, s := range r.strategies {
 		if r.tried[s.Name()] {
 			continue
 		}
-		if _, ok := s.Reframe(task, errs); !ok {
+		rt, ok := s.Reframe(task, errs)
+		if !ok {
 			continue
 		}
 		r.tried[s.Name()] = true
 		r.attempts++
-		return s
+		return s, rt
 	}
-	return nil
+	return nil, nil
 }
 
 // Attempts returns the number of strategies that have been dispensed so far.
