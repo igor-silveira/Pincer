@@ -29,6 +29,18 @@ func TestClassifyError_Transient(t *testing.T) {
 	}
 }
 
+func TestClassifyError_PermanentError(t *testing.T) {
+	err := &PermanentError{Msg: "approval error: approval request timed out"}
+	if got := ClassifyError(err); got != Permanent {
+		t.Errorf("PermanentError with timeout message: got %d, want Permanent", got)
+	}
+
+	wrapped := fmt.Errorf("tool failed: %w", &PermanentError{Msg: "denied"})
+	if got := ClassifyError(wrapped); got != Permanent {
+		t.Errorf("wrapped PermanentError: got %d, want Permanent", got)
+	}
+}
+
 func TestClassifyError_Permanent(t *testing.T) {
 	tests := []struct {
 		name string

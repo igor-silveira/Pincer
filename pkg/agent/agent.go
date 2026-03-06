@@ -424,6 +424,9 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 					result := r.executeTool(ctx, logger, sessionID, tc, out)
 					toolResults[idx] = result
 					if result.IsError {
+						if result.ErrorKind() == llm.ToolErrorPermanent {
+							return result.Content, &executor.PermanentError{Msg: result.Content}
+						}
 						return result.Content, fmt.Errorf("%s", result.Content)
 					}
 					return result.Content, nil
@@ -787,6 +790,9 @@ func (r *Runtime) RunSubturn(ctx context.Context, prompt string, allowedTools []
 					result := runTool(ctx, logger, tc, registry, r.sandbox, policy)
 					toolResults[idx] = result
 					if result.IsError {
+						if result.ErrorKind() == llm.ToolErrorPermanent {
+							return result.Content, &executor.PermanentError{Msg: result.Content}
+						}
 						return result.Content, fmt.Errorf("%s", result.Content)
 					}
 					return result.Content, nil

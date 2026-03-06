@@ -28,7 +28,17 @@ const (
 	Transient
 )
 
+type PermanentError struct {
+	Msg string
+}
+
+func (e *PermanentError) Error() string { return e.Msg }
+
 func ClassifyError(err error) ErrorKind {
+	var pe *PermanentError
+	if errors.As(err, &pe) {
+		return Permanent
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return Transient
 	}
