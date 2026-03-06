@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/igorsilveira/pincer/pkg/a2a"
 	"github.com/igorsilveira/pincer/pkg/agent"
+	"github.com/igorsilveira/pincer/pkg/agent/executor"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/channels"
@@ -171,6 +172,30 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 	approvalMode := agent.ApprovalMode(cfg.Agent.ToolApproval)
 	approver := agent.NewApprover(approvalMode, nil)
 
+	toolTimeout := config.DefaultToolTimeout
+	if cfg.Agent.ToolTimeout != "" {
+		if d, err := time.ParseDuration(cfg.Agent.ToolTimeout); err == nil {
+			toolTimeout = d
+		}
+	}
+
+	toolConcurrency := config.DefaultToolConcurrency
+	if cfg.Agent.ToolConcurrency > 0 {
+		toolConcurrency = cfg.Agent.ToolConcurrency
+	}
+
+	exec := executor.New(toolConcurrency)
+	recovery := &executor.DefaultRecovery{
+		MaxRetries: config.DefaultRecoveryRetries,
+		BaseDelay:  config.RecoveryBaseDelay,
+		MaxDelay:   config.RecoveryMaxDelay,
+	}
+
+	logger.Info("tool executor ready",
+		slog.Int("concurrency", toolConcurrency),
+		slog.String("timeout", toolTimeout.String()),
+	)
+
 	runtime := agent.NewRuntime(agent.RuntimeConfig{
 		Provider:          provider,
 		Store:             deps.db,
@@ -184,6 +209,9 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		Memory:            deps.mem,
 		Audit:             deps.auditLog,
 		DefaultPolicy:     buildDefaultPolicy(cfg),
+		Executor:          exec,
+		Recovery:          recovery,
+		ToolTimeout:       toolTimeout,
 	})
 
 	_ = deps.auditLog.Log(ctx, audit.EventConfigChg, "", "", "system",

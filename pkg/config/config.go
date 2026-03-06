@@ -41,6 +41,8 @@ type AgentConfig struct {
 	MaxToolIterations int      `toml:"max_tool_iterations"`
 	ToolApproval      string   `toml:"tool_approval"`
 	SystemPrompt      string   `toml:"system_prompt"`
+	ToolConcurrency   int      `toml:"tool_concurrency"`
+	ToolTimeout       string   `toml:"tool_timeout"`
 }
 
 type ChannelConfig struct {

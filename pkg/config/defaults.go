@@ -26,4 +26,10 @@ const (
 
 	ErrorTruncateLen      = 300
 	ToolResultTruncateLen = 200
+
+	DefaultToolConcurrency = 4
+	DefaultToolTimeout     = 2 * time.Minute
+	DefaultRecoveryRetries = 2
+	RecoveryBaseDelay      = 1 * time.Second
+	RecoveryMaxDelay       = 10 * time.Second
 )

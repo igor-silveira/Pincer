@@ -19,6 +19,7 @@ type ChannelCaps struct {
 	SupportsStreaming bool
 	SupportsMedia     bool
 	SupportsReactions bool
+	SupportsEditing   bool
 }
 
 type ApprovalRequest struct {
@@ -39,6 +40,25 @@ type ApprovalSender interface {
 
 type TypingIndicator interface {
 	SendTyping(ctx context.Context, sessionID string) error
+}
+
+type ToolPhase int
+
+const (
+	PhaseRunning ToolPhase = iota
+	PhaseRetrying
+	PhaseCompleted
+	PhaseFailed
+)
+
+type ToolProgress struct {
+	ToolName string
+	Phase    ToolPhase
+	Message  string
+}
+
+type ProgressRenderer interface {
+	SendProgress(ctx context.Context, sessionID string, progress ToolProgress) error
 }
 
 type Adapter interface {
