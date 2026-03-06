@@ -32,6 +32,9 @@ Thumbs.db
 dist/
 bin/
 
+# Pincer data directory
+.pincer/
+
 # Database
 *.db
 *.db-wal
