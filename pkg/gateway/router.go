@@ -17,10 +17,13 @@ import (
 	"github.com/igorsilveira/pincer/pkg/telemetry"
 )
 
+const spawnResultTTL = 30 * time.Minute
+
 type spawnResult struct {
 	Done   bool
 	Result string
 	Error  string
+	DoneAt time.Time
 }
 
 type ChannelRouter struct {
@@ -49,6 +52,27 @@ func NewChannelRouter(runtime *agent.Runtime, adapters []channels.Adapter, appro
 func (cr *ChannelRouter) Start(ctx context.Context) {
 	for _, adapter := range cr.adapters {
 		go cr.listenAdapter(ctx, adapter)
+	}
+	go cr.cleanupSpawnResults(ctx)
+}
+
+func (cr *ChannelRouter) cleanupSpawnResults(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cr.spawnResultsMu.Lock()
+			now := time.Now()
+			for id, sr := range cr.spawnResults {
+				if sr.Done && now.Sub(sr.DoneAt) > spawnResultTTL {
+					delete(cr.spawnResults, id)
+				}
+			}
+			cr.spawnResultsMu.Unlock()
+		}
 	}
 }
 
@@ -378,10 +402,11 @@ func (cr *ChannelRouter) RunSpawnAgent(ctx context.Context, sessionID, prompt st
 		result, err := cr.runtime.RunSubturn(spawnCtx, prompt, allowedTools)
 
 		cr.spawnResultsMu.Lock()
+		now := time.Now()
 		if err != nil {
-			cr.spawnResults[spawnID] = &spawnResult{Done: true, Error: err.Error()}
+			cr.spawnResults[spawnID] = &spawnResult{Done: true, Error: err.Error(), DoneAt: now}
 		} else {
-			cr.spawnResults[spawnID] = &spawnResult{Done: true, Result: result}
+			cr.spawnResults[spawnID] = &spawnResult{Done: true, Result: result, DoneAt: now}
 		}
 		cr.spawnResultsMu.Unlock()
 

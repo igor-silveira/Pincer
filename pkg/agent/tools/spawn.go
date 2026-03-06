@@ -74,7 +74,9 @@ func (t *SpawnTool) Execute(ctx context.Context, input json.RawMessage, _ sandbo
 			return "", fmt.Errorf("spawn: no session in context")
 		}
 
+		t.AuditLog.Log(ctx, "spawn_start", sessionID, fmt.Sprintf("task=%s", params.Task))
 		spawnID := t.RunSpawn(ctx, sessionID, params.Task, params.AllowedTools)
+		t.AuditLog.Log(ctx, "spawn_started", sessionID, fmt.Sprintf("spawn_id=%s", spawnID))
 		return fmt.Sprintf("spawned: %s", spawnID), nil
 
 	case "check":
@@ -82,6 +84,7 @@ func (t *SpawnTool) Execute(ctx context.Context, input json.RawMessage, _ sandbo
 			return "", fmt.Errorf("spawn: spawn_id is required for check")
 		}
 
+		t.AuditLog.Log(ctx, "spawn_check", sessionID, fmt.Sprintf("spawn_id=%s", params.SpawnID))
 		result, done, err := t.CheckSpawn(params.SpawnID)
 		if err != nil {
 			return "", fmt.Errorf("spawn: %w", err)
