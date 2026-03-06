@@ -357,6 +357,161 @@ func TestSessionTokenUsageEmpty(t *testing.T) {
 	}
 }
 
+func TestCheckpoint_CreateAndGet(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	cp := &Checkpoint{
+		ID:             "cp-1",
+		SessionID:      "sess-cp-1",
+		StepIndex:      1,
+		StateSnapshot:  `{"state":"snapshot"}`,
+		ToolOutputs:    `{"tool":"output"}`,
+		ContextSummary: "summary of context",
+	}
+	if err := s.SaveCheckpoint(ctx, cp); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	if cp.CreatedAt.IsZero() {
+		t.Fatal("CreatedAt should have been set")
+	}
+
+	got, err := s.LatestCheckpoint(ctx, "sess-cp-1")
+	if err != nil {
+		t.Fatalf("LatestCheckpoint: %v", err)
+	}
+	if got.ID != "cp-1" {
+		t.Errorf("ID = %q, want %q", got.ID, "cp-1")
+	}
+	if got.SessionID != "sess-cp-1" {
+		t.Errorf("SessionID = %q, want %q", got.SessionID, "sess-cp-1")
+	}
+	if got.StepIndex != 1 {
+		t.Errorf("StepIndex = %d, want 1", got.StepIndex)
+	}
+	if got.StateSnapshot != `{"state":"snapshot"}` {
+		t.Errorf("StateSnapshot = %q, want %q", got.StateSnapshot, `{"state":"snapshot"}`)
+	}
+	if got.ToolOutputs != `{"tool":"output"}` {
+		t.Errorf("ToolOutputs = %q, want %q", got.ToolOutputs, `{"tool":"output"}`)
+	}
+	if got.ContextSummary != "summary of context" {
+		t.Errorf("ContextSummary = %q, want %q", got.ContextSummary, "summary of context")
+	}
+}
+
+func TestCheckpoint_LatestByStepIndex(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	for i := 1; i <= 5; i++ {
+		cp := &Checkpoint{
+			ID:             fmt.Sprintf("cp-lat-%d", i),
+			SessionID:      "sess-lat",
+			StepIndex:      i,
+			StateSnapshot:  fmt.Sprintf("state-%d", i),
+			ToolOutputs:    "{}",
+			ContextSummary: "ctx",
+		}
+		if err := s.SaveCheckpoint(ctx, cp); err != nil {
+			t.Fatalf("SaveCheckpoint step %d: %v", i, err)
+		}
+	}
+
+	got, err := s.LatestCheckpoint(ctx, "sess-lat")
+	if err != nil {
+		t.Fatalf("LatestCheckpoint: %v", err)
+	}
+	if got.StepIndex != 5 {
+		t.Errorf("StepIndex = %d, want 5", got.StepIndex)
+	}
+	if got.StateSnapshot != "state-5" {
+		t.Errorf("StateSnapshot = %q, want %q", got.StateSnapshot, "state-5")
+	}
+}
+
+func TestCheckpoint_GetByStep(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	for i := 1; i <= 3; i++ {
+		cp := &Checkpoint{
+			ID:             fmt.Sprintf("cp-step-%d", i),
+			SessionID:      "sess-step",
+			StepIndex:      i,
+			StateSnapshot:  fmt.Sprintf("state-%d", i),
+			ToolOutputs:    "{}",
+			ContextSummary: "ctx",
+		}
+		if err := s.SaveCheckpoint(ctx, cp); err != nil {
+			t.Fatalf("SaveCheckpoint step %d: %v", i, err)
+		}
+	}
+
+	got, err := s.CheckpointAtStep(ctx, "sess-step", 2)
+	if err != nil {
+		t.Fatalf("CheckpointAtStep: %v", err)
+	}
+	if got.StepIndex != 2 {
+		t.Errorf("StepIndex = %d, want 2", got.StepIndex)
+	}
+	if got.StateSnapshot != "state-2" {
+		t.Errorf("StateSnapshot = %q, want %q", got.StateSnapshot, "state-2")
+	}
+}
+
+func TestCheckpoint_DeleteOlderThan(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	cp := &Checkpoint{
+		ID:             "cp-del-1",
+		SessionID:      "sess-del",
+		StepIndex:      1,
+		StateSnapshot:  "state",
+		ToolOutputs:    "{}",
+		ContextSummary: "ctx",
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := s.SaveCheckpoint(ctx, cp); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	deleted, err := s.DeleteCheckpointsOlderThan(ctx, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("DeleteCheckpointsOlderThan: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
+	}
+
+	_, err = s.LatestCheckpoint(ctx, "sess-del")
+	if err == nil {
+		t.Fatal("expected error after deletion")
+	}
+}
+
+func TestCheckpoint_NotFound(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	_, err := s.LatestCheckpoint(ctx, "nonexistent-session")
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("expected gorm.ErrRecordNotFound, got: %v", err)
+	}
+
+	_, err = s.CheckpointAtStep(ctx, "nonexistent-session", 1)
+	if err == nil {
+		t.Fatal("expected error for nonexistent checkpoint")
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Errorf("expected gorm.ErrRecordNotFound, got: %v", err)
+	}
+}
+
 func TestAppendMessageDefaultContentType(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

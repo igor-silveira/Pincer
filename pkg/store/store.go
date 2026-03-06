@@ -22,7 +22,7 @@ func New(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
-	if err := db.AutoMigrate(&Session{}, &Message{}, &Memory{}, &Credential{}); err != nil {
+	if err := db.AutoMigrate(&Session{}, &Message{}, &Memory{}, &Credential{}, &Checkpoint{}); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -209,4 +209,51 @@ func (s *Store) DeleteMessages(ctx context.Context, ids []string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Delete(&Message{}, ids).Error
 	})
+}
+
+type Checkpoint struct {
+	ID             string    `gorm:"primaryKey;column:id"`
+	SessionID      string    `gorm:"column:session_id;not null;uniqueIndex:idx_checkpoint_session_step"`
+	StepIndex      int       `gorm:"column:step_index;not null;uniqueIndex:idx_checkpoint_session_step"`
+	StateSnapshot  string    `gorm:"column:state_snapshot;not null"`
+	ToolOutputs    string    `gorm:"column:tool_outputs;not null"`
+	ContextSummary string    `gorm:"column:context_summary;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+}
+
+func (s *Store) SaveCheckpoint(ctx context.Context, cp *Checkpoint) error {
+	if cp.CreatedAt.IsZero() {
+		cp.CreatedAt = time.Now().UTC()
+	}
+	return s.db.WithContext(ctx).Save(cp).Error
+}
+
+func (s *Store) LatestCheckpoint(ctx context.Context, sessionID string) (*Checkpoint, error) {
+	cp := &Checkpoint{}
+	err := s.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("step_index DESC").
+		First(cp).Error
+	if err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+func (s *Store) CheckpointAtStep(ctx context.Context, sessionID string, step int) (*Checkpoint, error) {
+	cp := &Checkpoint{}
+	err := s.db.WithContext(ctx).
+		Where("session_id = ? AND step_index = ?", sessionID, step).
+		First(cp).Error
+	if err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+func (s *Store) DeleteCheckpointsOlderThan(ctx context.Context, before time.Time) (int64, error) {
+	result := s.db.WithContext(ctx).
+		Where("created_at < ?", before).
+		Delete(&Checkpoint{})
+	return result.RowsAffected, result.Error
 }
