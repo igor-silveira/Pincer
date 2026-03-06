@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/igorsilveira/pincer/pkg/llm"
 	"github.com/igorsilveira/pincer/pkg/sandbox"
@@ -68,6 +69,9 @@ func (t *FileReadTool) Execute(ctx context.Context, input json.RawMessage, sb sa
 	}
 	content := string(data)
 	if len(content) > maxOut {
+		for maxOut > 0 && maxOut < len(content) && !utf8.RuneStart(content[maxOut]) {
+			maxOut--
+		}
 		content = content[:maxOut] + "\n... (file truncated)"
 	}
 
