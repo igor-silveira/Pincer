@@ -140,6 +140,33 @@ func TestDefaultRetryConfig(t *testing.T) {
 	}
 }
 
+func TestLoadCheckpointConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkpoint.toml")
+	content := `
+[agent.checkpoint]
+enabled = true
+token_threshold = 20000
+retention_hours = 48
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Agent.Checkpoint.Enabled {
+		t.Error("Checkpoint.Enabled should be true")
+	}
+	if cfg.Agent.Checkpoint.TokenThreshold != 20000 {
+		t.Errorf("TokenThreshold = %d, want 20000", cfg.Agent.Checkpoint.TokenThreshold)
+	}
+	if cfg.Agent.Checkpoint.RetentionHours != 48 {
+		t.Errorf("RetentionHours = %d, want 48", cfg.Agent.Checkpoint.RetentionHours)
+	}
+}
+
 func TestDataDirEnv(t *testing.T) {
 	t.Setenv("PINCER_DATA_DIR", "/tmp/custom-pincer")
 	dir := DataDir()

@@ -43,13 +43,20 @@ type AgentConfig struct {
 	SystemPrompt      string      `toml:"system_prompt"`
 	ToolConcurrency   int         `toml:"tool_concurrency"`
 	ToolTimeout       string      `toml:"tool_timeout"`
-	Retry             RetryConfig `toml:"retry"`
+	Retry             RetryConfig      `toml:"retry"`
+	Checkpoint        CheckpointConfig `toml:"checkpoint"`
 }
 
 type RetryConfig struct {
 	MaxAttempts int      `toml:"max_attempts"`
 	Strategies  []string `toml:"strategies"`
 	CooldownMS  int      `toml:"cooldown_ms"`
+}
+
+type CheckpointConfig struct {
+	Enabled        bool `toml:"enabled"`
+	TokenThreshold int  `toml:"token_threshold"`
+	RetentionHours int  `toml:"retention_hours"`
 }
 
 type ChannelConfig struct {
@@ -142,6 +149,11 @@ func Default() *Config {
 				MaxAttempts: 3,
 				Strategies:  []string{"tool_swap", "decompose", "rephrase"},
 				CooldownMS:  500,
+			},
+			Checkpoint: CheckpointConfig{
+				Enabled:        false,
+				TokenThreshold: 10000,
+				RetentionHours: 24,
 			},
 		},
 		Sandbox: SandboxConfig{

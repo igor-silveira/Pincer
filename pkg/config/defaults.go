@@ -30,6 +30,9 @@ const (
 	DefaultRetryMaxAttempts = 3
 	DefaultRetryCooldownMS  = 500
 
+	DefaultCheckpointTokenThreshold = 10000
+	DefaultCheckpointRetentionHours = 24
+
 	DefaultToolConcurrency = 4
 	DefaultToolTimeout     = 2 * time.Minute
 	DefaultRecoveryRetries = 2
