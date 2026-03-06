@@ -291,20 +291,24 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		toolDefs = r.registry.Definitions()
 	}
 
+	history, err := r.store.RecentMessages(ctx, sessionID, config.RecentMessagesLimit)
+	if err != nil {
+		out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("loading history: %w", err)}
+		return
+	}
+
+	systemPrompt, chatMessages := r.buildSmartContext(ctx, sess.AgentID, sessionID, history)
+
 	var llmErrors int
 	var ephemeralContext string
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
-
-		history, err := r.store.RecentMessages(ctx, sessionID, config.RecentMessagesLimit)
-		if err != nil {
-			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("loading history: %w", err)}
-			return
+		if iteration > 0 {
+			chatMessages = r.rebuildMessages(history)
 		}
 
-		systemPrompt, chatMessages := r.buildSmartContext(ctx, sess.AgentID, sessionID, history)
-
+		prompt := systemPrompt
 		if ephemeralContext != "" {
-			systemPrompt += "\n\n# Error Recovery Context\n" + ephemeralContext
+			prompt += "\n\n# Error Recovery Context\n" + ephemeralContext
 			ephemeralContext = ""
 		}
 
@@ -316,7 +320,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		llmStart := time.Now()
 		events, err := r.chatWithRetry(ctx, logger, llm.ChatRequest{
 			Model:     r.model,
-			System:    systemPrompt,
+			System:    prompt,
 			Messages:  chatMessages,
 			MaxTokens: r.maxOutputTokens,
 			Stream:    true,
@@ -404,7 +408,12 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			return
 		}
 
-		if err := r.persistToolCallMessage(ctx, sessionID, string(textContent), toolCalls, usage); err != nil {
+		toolCallContent, marshalErr := marshalToolCalls(string(textContent), toolCalls)
+		if marshalErr != nil {
+			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("marshaling tool calls: %w", marshalErr)}
+			return
+		}
+		if err := r.persistMessage(ctx, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, toolCallContent, usage); err != nil {
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting tool calls: %w", err)}
 			return
 		}
@@ -489,10 +498,20 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			ephemeralContext = replanSummary.String()
 		}
 
-		if err := r.persistToolResultMessage(ctx, sessionID, toolResults); err != nil {
+		toolResultContent, marshalErr := marshalToolResults(toolResults)
+		if marshalErr != nil {
+			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("marshaling tool results: %w", marshalErr)}
+			return
+		}
+		if err := r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeToolResults, toolResultContent, nil); err != nil {
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting tool results: %w", err)}
 			return
 		}
+
+		history = append(history,
+			store.Message{Role: llm.RoleAssistant, ContentType: store.ContentTypeToolCalls, Content: toolCallContent},
+			store.Message{Role: llm.RoleUser, ContentType: store.ContentTypeToolResults, Content: toolResultContent},
+		)
 
 		out <- TurnEvent{
 			Type:    TurnProgress,
@@ -591,28 +610,33 @@ func (r *Runtime) persistAssistantMessage(ctx context.Context, sessionID, conten
 	return r.store.TouchSession(ctx, sessionID)
 }
 
-func (r *Runtime) persistToolCallMessage(ctx context.Context, sessionID, textContent string, toolCalls []llm.ToolCall, usage *llm.Usage) error {
+func marshalToolCalls(text string, toolCalls []llm.ToolCall) (string, error) {
 	data, err := json.Marshal(struct {
 		Text      string         `json:"text,omitempty"`
 		ToolCalls []llm.ToolCall `json:"tool_calls"`
 	}{
-		Text:      textContent,
+		Text:      text,
 		ToolCalls: toolCalls,
 	})
 	if err != nil {
-		return fmt.Errorf("marshaling tool calls: %w", err)
+		return "", fmt.Errorf("marshaling tool calls: %w", err)
 	}
-
-	return r.persistMessage(ctx, sessionID, llm.RoleAssistant, store.ContentTypeToolCalls, string(data), usage)
+	return string(data), nil
 }
 
-func (r *Runtime) persistToolResultMessage(ctx context.Context, sessionID string, results []llm.ToolResult) error {
+func marshalToolResults(results []llm.ToolResult) (string, error) {
 	data, err := json.Marshal(results)
 	if err != nil {
-		return fmt.Errorf("marshaling tool results: %w", err)
+		return "", fmt.Errorf("marshaling tool results: %w", err)
 	}
+	return string(data), nil
+}
 
-	return r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeToolResults, string(data), nil)
+func (r *Runtime) rebuildMessages(history []store.Message) []llm.ChatMessage {
+	if r.ctxBuilder != nil {
+		return r.ctxBuilder.RebuildMessages(history)
+	}
+	return r.buildContext(history)
 }
 
 func (r *Runtime) buildContext(history []store.Message) []llm.ChatMessage {

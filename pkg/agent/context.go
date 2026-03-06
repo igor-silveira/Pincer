@@ -15,8 +15,10 @@ type ContextBuilder struct {
 	mu              sync.RWMutex
 	staticHash      map[string]string
 	cachedTokens    map[string]int
+	imageCache      map[string][]byte
 	budget          int
 	outputReserve   int
+	lastUsedTokens  int
 }
 
 type WorkspaceFile struct {
@@ -34,6 +36,7 @@ func NewContextBuilder(budget, outputReserve int) *ContextBuilder {
 	return &ContextBuilder{
 		staticHash:    make(map[string]string),
 		cachedTokens:  make(map[string]int),
+		imageCache:    make(map[string][]byte),
 		budget:        budget,
 		outputReserve: outputReserve,
 	}
@@ -71,9 +74,9 @@ func (cb *ContextBuilder) Build(workspaceFiles []WorkspaceFile, history []store.
 		finalPrompt += "\n\n# Workspace Context" + wsContext
 	}
 
-	remaining := cb.budget - usedTokens
+	cb.lastUsedTokens = usedTokens
 
-	remaining -= cb.outputReserve
+	remaining := cb.budget - usedTokens - cb.outputReserve
 
 	messages := cb.selectHistory(history, remaining)
 
@@ -120,7 +123,7 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 					tokens += config.ImageTokenEstimate
 				}
 			}
-			resolveImageData(chatMsg.ToolResults)
+			cb.resolveImageData(chatMsg.ToolResults)
 			imageResultsSeen++
 		} else if len(chatMsg.ToolResults) > 0 {
 			slog.Debug("stripping images from old tool result",
@@ -154,14 +157,29 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 	return sanitizeToolPairs(result)
 }
 
-func resolveImageData(results []llm.ToolResult) {
+// RebuildMessages reselects history messages using the token budget
+// cached from the last Build call. Use this to avoid recomputing
+// workspace file hashes and system prompt tokens on every iteration.
+func (cb *ContextBuilder) RebuildMessages(history []store.Message) []llm.ChatMessage {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	remaining := cb.budget - cb.lastUsedTokens - cb.outputReserve
+	return cb.selectHistory(history, remaining)
+}
+
+func (cb *ContextBuilder) resolveImageData(results []llm.ToolResult) {
 	for i := range results {
 		for j := range results[i].Images {
 			img := &results[i].Images[j]
 			if img.Data() == nil && img.Path != "" {
+				if cached, ok := cb.imageCache[img.Path]; ok {
+					img.SetData(cached)
+					continue
+				}
 				data, err := os.ReadFile(img.Path)
 				if err == nil {
 					img.SetData(data)
+					cb.imageCache[img.Path] = data
 				}
 			}
 		}

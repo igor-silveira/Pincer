@@ -284,12 +284,13 @@ func TestResolveImageData_LoadsFromDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	cb := NewContextBuilder(100000, 4096)
 	img := llm.ImageContent{MediaType: "image/png", Path: path}
 	results := []llm.ToolResult{
 		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
 	}
 
-	resolveImageData(results)
+	cb.resolveImageData(results)
 
 	if results[0].Images[0].Data() == nil {
 		t.Fatal("expected image data to be loaded")
@@ -299,13 +300,53 @@ func TestResolveImageData_LoadsFromDisk(t *testing.T) {
 	}
 }
 
+func TestResolveImageData_CachesAcrossCalls(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.png")
+	if err := os.WriteFile(path, []byte("fake png"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cb := NewContextBuilder(100000, 4096)
+
+	// First call loads from disk
+	results1 := []llm.ToolResult{
+		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{
+			{MediaType: "image/png", Path: path},
+		}},
+	}
+	cb.resolveImageData(results1)
+
+	if results1[0].Images[0].Data() == nil {
+		t.Fatal("expected image data to be loaded")
+	}
+
+	// Delete the file — second call should use cache
+	os.Remove(path)
+
+	results2 := []llm.ToolResult{
+		{ToolCallID: "tc2", Content: "output", Images: []llm.ImageContent{
+			{MediaType: "image/png", Path: path},
+		}},
+	}
+	cb.resolveImageData(results2)
+
+	if results2[0].Images[0].Data() == nil {
+		t.Fatal("expected image data from cache after file deleted")
+	}
+	if string(results2[0].Images[0].Data()) != "fake png" {
+		t.Errorf("cached data = %q, want %q", string(results2[0].Images[0].Data()), "fake png")
+	}
+}
+
 func TestResolveImageData_MissingFile(t *testing.T) {
+	cb := NewContextBuilder(100000, 4096)
 	img := llm.ImageContent{MediaType: "image/png", Path: "/nonexistent/path.png"}
 	results := []llm.ToolResult{
 		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
 	}
 
-	resolveImageData(results)
+	cb.resolveImageData(results)
 
 	if results[0].Images[0].Data() != nil {
 		t.Error("expected nil data for missing file")
@@ -313,13 +354,14 @@ func TestResolveImageData_MissingFile(t *testing.T) {
 }
 
 func TestResolveImageData_AlreadyHasData(t *testing.T) {
+	cb := NewContextBuilder(100000, 4096)
 	img := llm.ImageContent{MediaType: "image/png", Path: "/some/path.png"}
 	img.SetData([]byte("existing"))
 	results := []llm.ToolResult{
 		{ToolCallID: "tc1", Content: "output", Images: []llm.ImageContent{img}},
 	}
 
-	resolveImageData(results)
+	cb.resolveImageData(results)
 
 	if string(results[0].Images[0].Data()) != "existing" {
 		t.Errorf("data should not be overwritten, got %q", string(results[0].Images[0].Data()))
@@ -327,10 +369,30 @@ func TestResolveImageData_AlreadyHasData(t *testing.T) {
 }
 
 func TestResolveImageData_EmptyImages(t *testing.T) {
+	cb := NewContextBuilder(100000, 4096)
 	results := []llm.ToolResult{
 		{ToolCallID: "tc1", Content: "output"},
 	}
-	resolveImageData(results)
+	cb.resolveImageData(results)
+}
+
+func TestRebuildMessages_UsesCachedBudget(t *testing.T) {
+	cb := NewContextBuilder(100000, 4096)
+
+	wsFiles := []WorkspaceFile{
+		{Key: "test", Content: "workspace content here"},
+	}
+	history := []store.Message{
+		{Role: llm.RoleUser, Content: "hello"},
+		{Role: llm.RoleAssistant, Content: "hi"},
+	}
+
+	_, msgsFromBuild := cb.Build(wsFiles, history, "system prompt")
+	msgsFromRebuild := cb.RebuildMessages(history)
+
+	if len(msgsFromBuild) != len(msgsFromRebuild) {
+		t.Errorf("RebuildMessages returned %d messages, Build returned %d", len(msgsFromRebuild), len(msgsFromBuild))
+	}
 }
 
 func TestSelectHistory_ImageTokenBudget(t *testing.T) {
