@@ -239,7 +239,7 @@ func TestRunTurn_EphemeralErrorNotPersisted(t *testing.T) {
 		}
 	}
 
-	if provider.gotSystemPrompts == nil || len(provider.gotSystemPrompts) < 2 {
+	if len(provider.gotSystemPrompts) < 2 {
 		t.Fatal("expected at least 2 LLM calls (1 failed, 1 success)")
 	}
 	retryPrompt := provider.gotSystemPrompts[1]

@@ -77,11 +77,15 @@ func TestGet_RenewsTTL(t *testing.T) {
 	c := New(WithTTL(80 * time.Millisecond))
 	path := tmpFile(t, "alive")
 
-	c.Get(path)
+	if _, err := c.Get(path); err != nil {
+		t.Fatal(err)
+	}
 
 	// At 50ms, read again to renew TTL.
 	time.Sleep(50 * time.Millisecond)
-	c.Get(path)
+	if _, err := c.Get(path); err != nil {
+		t.Fatal(err)
+	}
 
 	// At 100ms from start (50ms since last access), TTL (80ms) not exceeded.
 	time.Sleep(50 * time.Millisecond)
@@ -102,7 +106,9 @@ func TestRefreshAll_TTLEvictsUnusedEntry(t *testing.T) {
 	c := New(WithTTL(20 * time.Millisecond))
 	path := tmpFile(t, "forgotten")
 
-	c.Get(path)
+	if _, err := c.Get(path); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(30 * time.Millisecond)
 
 	c.refreshAll()
@@ -132,7 +138,9 @@ func TestRefreshAll_DoesNotRenewTTL(t *testing.T) {
 
 	// Update file on disk so refresh re-reads it.
 	time.Sleep(10 * time.Millisecond)
-	os.WriteFile(path, []byte("v2"), 0600)
+	if err := os.WriteFile(path, []byte("v2"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	// Refresh picks up the change but must NOT renew lastAccess.
 	c.refreshAll()
@@ -229,8 +237,12 @@ func TestRefreshAll_EvictsDeletedFile(t *testing.T) {
 	c := New()
 	path := tmpFile(t, "temp")
 
-	c.Get(path)
-	os.Remove(path)
+	if _, err := c.Get(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
 	c.refreshAll()
 
 	if c.Len() != 0 {

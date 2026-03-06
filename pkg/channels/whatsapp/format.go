@@ -11,8 +11,6 @@ var (
 	inlineCodeRe    = regexp.MustCompile("`([^`]+)`")
 	boldItalicRe    = regexp.MustCompile(`\*{3}(.+?)\*{3}`)
 	boldRe          = regexp.MustCompile(`\*{2}(.+?)\*{2}`)
-	italicUnderRe   = regexp.MustCompile(`_(.+?)_`)
-	italicStarRe    = regexp.MustCompile(`(?:^|(?P<pre>[^*]))\*(?P<text>[^*]+?)\*(?:[^*]|$)`)
 	strikethroughRe = regexp.MustCompile(`~~(.+?)~~`)
 	linkRe          = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 	headerRe        = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)

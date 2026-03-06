@@ -322,7 +322,7 @@ func TestResolveImageData_CachesAcrossCalls(t *testing.T) {
 	}
 
 	// Delete the file — second call should use cache
-	os.Remove(path)
+	_ = os.Remove(path)
 
 	results2 := []llm.ToolResult{
 		{ToolCallID: "tc2", Content: "output", Images: []llm.ImageContent{
