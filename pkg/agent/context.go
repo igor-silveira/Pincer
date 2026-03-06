@@ -117,21 +117,30 @@ func (cb *ContextBuilder) selectHistory(history []store.Message, budget int) []l
 
 		chatMsg := messageToLLM(m)
 
-		if len(chatMsg.ToolResults) > 0 && imageResultsSeen < config.MaxRecentImageMessages {
+		if len(chatMsg.ToolResults) > 0 {
+			hasImages := false
 			for j := range chatMsg.ToolResults {
-				for range chatMsg.ToolResults[j].Images {
-					tokens += config.ImageTokenEstimate
+				if len(chatMsg.ToolResults[j].Images) > 0 {
+					hasImages = true
+					break
 				}
 			}
-			cb.resolveImageData(chatMsg.ToolResults)
-			imageResultsSeen++
-		} else if len(chatMsg.ToolResults) > 0 {
-			slog.Debug("stripping images from old tool result",
-				slog.Int("message_index", i),
-				slog.Int("images_seen", imageResultsSeen),
-			)
-			for j := range chatMsg.ToolResults {
-				chatMsg.ToolResults[j].Images = nil
+			if hasImages && imageResultsSeen < config.MaxRecentImageMessages {
+				for j := range chatMsg.ToolResults {
+					for range chatMsg.ToolResults[j].Images {
+						tokens += config.ImageTokenEstimate
+					}
+				}
+				cb.resolveImageData(chatMsg.ToolResults)
+				imageResultsSeen++
+			} else if hasImages {
+				slog.Debug("stripping images from old tool result",
+					slog.Int("message_index", i),
+					slog.Int("images_seen", imageResultsSeen),
+				)
+				for j := range chatMsg.ToolResults {
+					chatMsg.ToolResults[j].Images = nil
+				}
 			}
 		}
 
