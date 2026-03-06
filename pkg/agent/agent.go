@@ -122,6 +122,8 @@ type Runtime struct {
 	ctxBuilder       *ContextBuilder
 	memoryMu         sync.Mutex
 	memoryHashes     map[string]map[string]string
+	sessionMu        sync.Mutex
+	sessionLocks     map[string]*sync.Mutex
 }
 
 type RuntimeConfig struct {
@@ -169,6 +171,7 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		defaultPolicy:   cfg.DefaultPolicy,
 		ctxBuilder:      NewContextBuilder(cfg.MaxTokens, cfg.MaxOutputTokens),
 		memoryHashes:    make(map[string]map[string]string),
+		sessionLocks:    make(map[string]*sync.Mutex),
 	}
 }
 
@@ -196,6 +199,17 @@ const defaultSystemPrompt = `You are Pincer, a helpful AI assistant. Be concise 
 - Long conversations are automatically summarized. Key information may be in a [Session Summary] at the start of your history.
 - Store important facts in memory early to avoid losing them during summarization.`
 
+func (r *Runtime) sessionLock(sessionID string) *sync.Mutex {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	mu, ok := r.sessionLocks[sessionID]
+	if !ok {
+		mu = &sync.Mutex{}
+		r.sessionLocks[sessionID] = mu
+	}
+	return mu
+}
+
 func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<-chan TurnEvent, error) {
 	logger := telemetry.FromContext(ctx)
 
@@ -203,6 +217,9 @@ func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<
 	if err != nil {
 		return nil, fmt.Errorf("resolving session: %w", err)
 	}
+
+	mu := r.sessionLock(session.ID)
+	mu.Lock()
 
 	userMsg := &store.Message{
 		ID:        uuid.NewString(),
@@ -212,6 +229,7 @@ func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := r.store.AppendMessage(ctx, userMsg); err != nil {
+		mu.Unlock()
 		return nil, fmt.Errorf("persisting user message: %w", err)
 	}
 
@@ -220,7 +238,10 @@ func (r *Runtime) RunTurn(ctx context.Context, sessionID, userMessage string) (<
 	)
 
 	out := make(chan TurnEvent, config.TurnEventBufferSize)
-	go r.runAgenticLoop(ctx, session.ID, out)
+	go func() {
+		defer mu.Unlock()
+		r.runAgenticLoop(ctx, session.ID, out)
+	}()
 
 	return out, nil
 }
