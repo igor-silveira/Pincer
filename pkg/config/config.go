@@ -218,6 +218,12 @@ func Load(path string) (*Config, error) {
 	if cfg.Store.DSN == "" {
 		cfg.Store.DSN = filepath.Join(DataDir(), "pincer.db")
 	}
+	if cfg.Soul.Path == "" {
+		cfg.Soul.Path = filepath.Join(DataDir(), "soul.toml")
+	}
+	if cfg.Skills.Dir == "" {
+		cfg.Skills.Dir = filepath.Join(DataDir(), "skills")
+	}
 
 	mu.Lock()
 	current = cfg
@@ -240,11 +246,7 @@ func DataDir() string {
 	if dir := os.Getenv("PINCER_DATA_DIR"); dir != "" {
 		return dir
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".pincer"
-	}
-	return filepath.Join(home, ".pincer")
+	return ".pincer"
 }
 
 func DefaultConfigPath() string {

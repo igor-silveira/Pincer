@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -101,11 +100,7 @@ func initStorage(cfg *config.Config, logger *slog.Logger) (*storeDeps, error) {
 }
 
 func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, deps *storeDeps) (*agent.Runtime, *tools.Registry, *agent.Approver, *soul.Soul, error) {
-	soulPath := cfg.Soul.Path
-	if soulPath == "" {
-		soulPath = filepath.Join(config.DataDir(), "soul.toml")
-	}
-	soulDef, err := soul.Load(soulPath)
+	soulDef, err := soul.Load(cfg.Soul.Path)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("loading soul: %w", err)
 	}
@@ -139,12 +134,8 @@ func initAgent(ctx context.Context, cfg *config.Config, logger *slog.Logger, dep
 		registry.Register(&tools.CredentialTool{Credentials: deps.credStore})
 	}
 
-	skillDir := cfg.Skills.Dir
-	if skillDir == "" {
-		skillDir = filepath.Join(config.DataDir(), "skills")
-	}
 	engine := skills.NewEngine(skills.EngineConfig{
-		SkillDir:      skillDir,
+		SkillDir:      cfg.Skills.Dir,
 		AllowUnsigned: cfg.Skills.AllowUnsigned,
 	})
 	results, err := engine.LoadAll()

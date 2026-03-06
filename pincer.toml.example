@@ -27,7 +27,7 @@ max_versions = 100
 
 [store]
 driver = "sqlite"
-#dsn = "~/.pincer/pincer.db"
+#dsn = ".pincer/pincer.db"
 
 [log]
 level = "info"

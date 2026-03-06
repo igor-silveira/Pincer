@@ -29,7 +29,7 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.pincer/pincer.toml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .pincer/pincer.toml)")
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(startCmd)
