@@ -105,7 +105,8 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 		return fmt.Errorf("whatsapp: no chat for session %s", msg.SessionID)
 	}
 
-	chunks := channels.SplitMessage(msg.Content, 65536)
+	formatted := markdownToWhatsApp(msg.Content)
+	chunks := channels.SplitMessage(formatted, 65536)
 	for _, chunk := range chunks {
 		text := chunk
 		if _, err := a.client.SendMessage(ctx, jid, &waE2E.Message{
