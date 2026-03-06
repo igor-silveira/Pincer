@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/igorsilveira/pincer/pkg/agent/checkpoint"
 	"github.com/igorsilveira/pincer/pkg/agent/executor"
 	"github.com/igorsilveira/pincer/pkg/agent/retry"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
@@ -131,6 +132,7 @@ type Runtime struct {
 	recovery         executor.RecoveryStrategy
 	toolTimeout      time.Duration
 	retryStrategies  []retry.Strategy
+	checkpointMgr    *checkpoint.Manager
 }
 
 type RuntimeConfig struct {
@@ -151,6 +153,7 @@ type RuntimeConfig struct {
 	Recovery         executor.RecoveryStrategy
 	ToolTimeout      time.Duration
 	RetryStrategies  []retry.Strategy
+	CheckpointMgr   *checkpoint.Manager
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -203,6 +206,7 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		recovery:        recov,
 		toolTimeout:     toolTimeout,
 		retryStrategies: cfg.RetryStrategies,
+		checkpointMgr:   cfg.CheckpointMgr,
 	}
 }
 
@@ -531,6 +535,33 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		if err := r.persistMessage(ctx, sessionID, llm.RoleUser, store.ContentTypeToolResults, toolResultContent, nil); err != nil {
 			out <- TurnEvent{Type: TurnError, Error: fmt.Errorf("persisting tool results: %w", err)}
 			return
+		}
+
+		// Save checkpoint if configured and policy triggers
+		if r.checkpointMgr != nil && usage != nil {
+			totalTokens := usage.InputTokens + usage.OutputTokens
+			cpState := checkpoint.IterationState{
+				TokensConsumed:       totalTokens,
+				LastCheckpointTokens: 0,
+				Iteration:            iteration,
+			}
+			if r.checkpointMgr.ShouldCheckpoint(cpState) {
+				snap := r.checkpointMgr.BuildSnapshot(iteration+1, toolNames, string(textContent))
+				snap.SessionID = sessionID
+				cpRecord := &store.Checkpoint{
+					ID:             snap.ID,
+					SessionID:      sessionID,
+					StepIndex:      snap.StepIndex,
+					StateSnapshot:  fmt.Sprintf(`{"iteration":%d,"tokens":%d}`, iteration, totalTokens),
+					ToolOutputs:    snap.ToolOutputs,
+					ContextSummary: snap.ContextSummary,
+				}
+				if err := r.store.SaveCheckpoint(ctx, cpRecord); err != nil {
+					logger.Warn("failed to save checkpoint", slog.String("err", err.Error()))
+				} else {
+					logger.Info("checkpoint saved", slog.Int("step", snap.StepIndex))
+				}
+			}
 		}
 
 		history = append(history,
