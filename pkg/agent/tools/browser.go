@@ -393,6 +393,15 @@ func (t *BrowserTool) captureScreenshot(browserCtx context.Context, sessionID st
 	return path, nil
 }
 
+func (t *BrowserTool) currentContext(sessionID string) context.Context {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if sess, ok := t.sessions[sessionID]; ok {
+		return sess.ctx
+	}
+	return nil
+}
+
 func (t *BrowserTool) pageInfo(browserCtx context.Context) (title, url string) {
 	_ = chromedp.Run(browserCtx,
 		chromedp.Title(&title),
@@ -439,8 +448,9 @@ func (t *BrowserTool) doClick(ctx context.Context, sessionID string, params brow
 		return "", fmt.Errorf("browser: click failed: %w", err)
 	}
 
-	_ = chromedp.Run(browserCtx, chromedp.Sleep(500*time.Millisecond))
+	time.Sleep(500 * time.Millisecond)
 
+	browserCtx = t.currentContext(sessionID)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Clicked %q\nPage: %s (%s)\nScreenshot: %s", params.Selector, loc, title, path), nil
@@ -656,8 +666,9 @@ func (t *BrowserTool) doBack(_ context.Context, sessionID string) (string, error
 		return "", fmt.Errorf("browser: back failed: %w", err)
 	}
 
-	_ = chromedp.Run(browserCtx, chromedp.Sleep(500*time.Millisecond))
+	time.Sleep(500 * time.Millisecond)
 
+	browserCtx = t.currentContext(sessionID)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Navigated back\nPage: %s (%s)\nScreenshot: %s", loc, title, path), nil
@@ -673,8 +684,9 @@ func (t *BrowserTool) doForward(_ context.Context, sessionID string) (string, er
 		return "", fmt.Errorf("browser: forward failed: %w", err)
 	}
 
-	_ = chromedp.Run(browserCtx, chromedp.Sleep(500*time.Millisecond))
+	time.Sleep(500 * time.Millisecond)
 
+	browserCtx = t.currentContext(sessionID)
 	title, loc := t.pageInfo(browserCtx)
 	path, _ := t.captureScreenshot(browserCtx, sessionID)
 	return fmt.Sprintf("Navigated forward\nPage: %s (%s)\nScreenshot: %s", loc, title, path), nil
