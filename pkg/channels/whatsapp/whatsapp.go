@@ -145,10 +145,10 @@ func (a *Adapter) handleEvent(evt interface{}) {
 		}
 
 		if len(a.allowList) > 0 {
-			sender := v.Info.Sender.User
-			if _, ok := a.allowList[sender]; !ok {
+			senderUser := v.Info.Sender.User
+			if _, ok := a.allowList[senderUser]; !ok {
 				slog.Info("whatsapp message blocked by allow_list",
-					slog.String("sender_user", sender),
+					slog.String("sender_user", senderUser),
 					slog.String("sender_full", v.Info.Sender.String()),
 					slog.String("chat", v.Info.Chat.String()),
 				)
@@ -164,12 +164,13 @@ func (a *Adapter) handleEvent(evt interface{}) {
 			return
 		}
 
-		sessionID := a.sessions.GetOrCreate(v.Info.Sender)
+		sender := v.Info.Sender.ToNonAD()
+		sessionID := a.sessions.GetOrCreate(sender)
 
 		a.inbound <- channels.InboundMessage{
 			ChannelName: "whatsapp",
 			SessionID:   sessionID,
-			PeerID:      v.Info.Sender.String(),
+			PeerID:      sender.String(),
 			Content:     text,
 		}
 	}
