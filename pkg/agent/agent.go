@@ -312,7 +312,15 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 	systemPrompt, chatMessages := r.buildSmartContext(ctx, sess.AgentID, sessionID, history)
 
 	var llmErrors int
+	var verificationAttempts int
+	var lastCheckpointTokens int
 	var ephemeralContext string
+
+	var rotator *retry.Rotator
+	if len(r.retryStrategies) > 0 {
+		rotator = retry.NewRotator(r.retryStrategies, config.DefaultRetryMaxAttempts)
+	}
+
 	for iteration := 0; iteration < r.maxToolIter; iteration++ {
 		if iteration > 0 {
 			chatMessages = r.rebuildMessages(history)
@@ -425,15 +433,22 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				}
 				vResult := r.verificationRunner.Run(ctx, tr)
 				if vResult.Status == verification.Failed {
-					logger.Info("verification gate failed, retrying",
-						slog.String("reason", vResult.Reason),
+					verificationAttempts++
+					if verificationAttempts <= config.DefaultVerificationMaxAttempts {
+						logger.Info("verification gate failed, retrying",
+							slog.String("reason", vResult.Reason),
+							slog.Int("attempt", verificationAttempts),
+						)
+						ephemeralContext = fmt.Sprintf(
+							"Your previous response failed verification: %s. Please try a different approach.",
+							vResult.Reason,
+						)
+						out <- TurnEvent{Type: TurnProgress, Message: "Verification failed, retrying..."}
+						continue
+					}
+					logger.Warn("verification failed, max attempts exceeded",
+						slog.Int("attempts", verificationAttempts),
 					)
-					ephemeralContext = fmt.Sprintf(
-						"Your previous response failed verification: %s. Please try a different approach.",
-						vResult.Reason,
-					)
-					out <- TurnEvent{Type: TurnProgress, Message: "Verification failed, retrying..."}
-					continue // next iteration of the agentic loop
 				}
 			}
 
@@ -528,8 +543,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		}
 
 		if len(replanSummary.FailedTools) > 0 {
-			if len(r.retryStrategies) > 0 {
-				rotator := retry.NewRotator(r.retryStrategies, config.DefaultRetryMaxAttempts)
+			if rotator != nil {
 				tc := retry.TaskContext{
 					SessionID: sessionID,
 					Iteration: iteration,
@@ -567,7 +581,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 			totalTokens := usage.InputTokens + usage.OutputTokens
 			cpState := checkpoint.IterationState{
 				TokensConsumed:       totalTokens,
-				LastCheckpointTokens: 0,
+				LastCheckpointTokens: lastCheckpointTokens,
 				Iteration:            iteration,
 			}
 			if r.checkpointMgr.ShouldCheckpoint(cpState) {
@@ -584,6 +598,7 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 				if err := r.store.SaveCheckpoint(ctx, cpRecord); err != nil {
 					logger.Warn("failed to save checkpoint", slog.String("err", err.Error()))
 				} else {
+					lastCheckpointTokens = totalTokens
 					logger.Info("checkpoint saved", slog.Int("step", snap.StepIndex))
 				}
 			}
