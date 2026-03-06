@@ -167,6 +167,34 @@ retention_hours = 48
 	}
 }
 
+func TestLoadVerificationConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "verify.toml")
+	content := `
+[agent.verification]
+enabled = true
+confidence_threshold = 0.9
+max_attempts = 3
+gates = ["llm_self_check", "command_output"]
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Agent.Verification.Enabled {
+		t.Error("Verification.Enabled should be true")
+	}
+	if cfg.Agent.Verification.ConfidenceThreshold != 0.9 {
+		t.Errorf("ConfidenceThreshold = %f, want 0.9", cfg.Agent.Verification.ConfidenceThreshold)
+	}
+	if cfg.Agent.Verification.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts = %d, want 3", cfg.Agent.Verification.MaxAttempts)
+	}
+}
+
 func TestDataDirEnv(t *testing.T) {
 	t.Setenv("PINCER_DATA_DIR", "/tmp/custom-pincer")
 	dir := DataDir()

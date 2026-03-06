@@ -33,6 +33,9 @@ const (
 	DefaultCheckpointTokenThreshold = 10000
 	DefaultCheckpointRetentionHours = 24
 
+	DefaultVerificationConfidence  = 0.8
+	DefaultVerificationMaxAttempts = 2
+
 	DefaultToolConcurrency = 4
 	DefaultToolTimeout     = 2 * time.Minute
 	DefaultRecoveryRetries = 2

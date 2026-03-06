@@ -43,8 +43,9 @@ type AgentConfig struct {
 	SystemPrompt      string      `toml:"system_prompt"`
 	ToolConcurrency   int         `toml:"tool_concurrency"`
 	ToolTimeout       string      `toml:"tool_timeout"`
-	Retry             RetryConfig      `toml:"retry"`
-	Checkpoint        CheckpointConfig `toml:"checkpoint"`
+	Retry             RetryConfig        `toml:"retry"`
+	Checkpoint        CheckpointConfig   `toml:"checkpoint"`
+	Verification      VerificationConfig `toml:"verification"`
 }
 
 type RetryConfig struct {
@@ -57,6 +58,13 @@ type CheckpointConfig struct {
 	Enabled        bool `toml:"enabled"`
 	TokenThreshold int  `toml:"token_threshold"`
 	RetentionHours int  `toml:"retention_hours"`
+}
+
+type VerificationConfig struct {
+	Enabled             bool     `toml:"enabled"`
+	ConfidenceThreshold float64  `toml:"confidence_threshold"`
+	MaxAttempts         int      `toml:"max_attempts"`
+	Gates               []string `toml:"gates"`
 }
 
 type ChannelConfig struct {
@@ -154,6 +162,12 @@ func Default() *Config {
 				Enabled:        false,
 				TokenThreshold: 10000,
 				RetentionHours: 24,
+			},
+			Verification: VerificationConfig{
+				Enabled:             false,
+				ConfidenceThreshold: 0.8,
+				MaxAttempts:         2,
+				Gates:               []string{"llm_self_check"},
 			},
 		},
 		Sandbox: SandboxConfig{
