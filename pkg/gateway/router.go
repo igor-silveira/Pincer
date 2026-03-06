@@ -138,7 +138,7 @@ func (cr *ChannelRouter) consumeTurnEvents(ctx context.Context, logger *slog.Log
 		switch ev.Type {
 		case agent.TurnApprovalNeeded:
 			cr.sendApprovalRequest(ctx, adapter, sessionID, ev.ApprovalRequest)
-		case agent.TurnProgress:
+		case agent.TurnProgress, agent.TurnToolStart:
 			if err := adapter.Send(ctx, channels.OutboundMessage{
 				SessionID: sessionID,
 				Content:   ev.Message,

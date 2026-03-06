@@ -44,12 +44,23 @@ type ImageContent struct {
 func (ic *ImageContent) Data() []byte     { return ic.data }
 func (ic *ImageContent) SetData(b []byte) { ic.data = b }
 
+type ToolErrorKind int
+
+const (
+	ToolErrorPermanent ToolErrorKind = iota
+	ToolErrorTransient
+)
+
 type ToolResult struct {
 	ToolCallID string         `json:"tool_call_id"`
 	Content    string         `json:"content"`
 	IsError    bool           `json:"is_error,omitempty"`
 	Images     []ImageContent `json:"images,omitempty"`
+	errorKind  ToolErrorKind
 }
+
+func (tr *ToolResult) ErrorKind() ToolErrorKind     { return tr.errorKind }
+func (tr *ToolResult) SetErrorKind(k ToolErrorKind)  { tr.errorKind = k }
 
 type ChatMessage struct {
 	Role        string       `json:"role"`
