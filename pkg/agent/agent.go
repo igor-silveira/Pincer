@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/igorsilveira/pincer/pkg/agent/executor"
+	"github.com/igorsilveira/pincer/pkg/agent/retry"
 	"github.com/igorsilveira/pincer/pkg/agent/tools"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/config"
@@ -129,6 +130,7 @@ type Runtime struct {
 	executor         *executor.Executor
 	recovery         executor.RecoveryStrategy
 	toolTimeout      time.Duration
+	retryStrategies  []retry.Strategy
 }
 
 type RuntimeConfig struct {
@@ -148,6 +150,7 @@ type RuntimeConfig struct {
 	Executor         *executor.Executor
 	Recovery         executor.RecoveryStrategy
 	ToolTimeout      time.Duration
+	RetryStrategies  []retry.Strategy
 }
 
 func NewRuntime(cfg RuntimeConfig) *Runtime {
@@ -199,6 +202,7 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 		executor:        exec,
 		recovery:        recov,
 		toolTimeout:     toolTimeout,
+		retryStrategies: cfg.RetryStrategies,
 	}
 }
 
@@ -495,7 +499,28 @@ func (r *Runtime) runAgenticLoop(ctx context.Context, sessionID string, out chan
 		}
 
 		if len(replanSummary.FailedTools) > 0 {
-			ephemeralContext = replanSummary.String()
+			if len(r.retryStrategies) > 0 {
+				rotator := retry.NewRotator(r.retryStrategies, config.DefaultRetryMaxAttempts)
+				tc := retry.TaskContext{
+					SessionID: sessionID,
+					Iteration: iteration,
+				}
+				errs := make([]error, len(replanSummary.FailedTools))
+				for i, f := range replanSummary.FailedTools {
+					errs[i] = fmt.Errorf("%s: %s", f.Name, f.Error)
+				}
+				if s, rf := rotator.Next(tc, errs); s != nil {
+					ephemeralContext = rf.EphemeralHint
+					logger.Info("strategy rotation applied",
+						slog.String("strategy", s.Name()),
+						slog.Int("iteration", iteration),
+					)
+				} else {
+					ephemeralContext = replanSummary.String()
+				}
+			} else {
+				ephemeralContext = replanSummary.String()
+			}
 		}
 
 		toolResultContent, marshalErr := marshalToolResults(toolResults)
