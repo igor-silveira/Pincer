@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/igorsilveira/pincer/pkg/audit"
 	"github.com/igorsilveira/pincer/pkg/llm"
@@ -36,6 +37,7 @@ type BrowserTool struct {
 }
 
 type browserSession struct {
+	allocCtx    context.Context
 	allocCancel context.CancelFunc
 	ctxCancel   context.CancelFunc
 	ctx         context.Context
@@ -286,12 +288,45 @@ func (t *BrowserTool) getOrCreateSession(sessionID string) (context.Context, err
 		return nil, fmt.Errorf("browser: starting chrome: timed out after 30s")
 	}
 
-	t.sessions[sessionID] = &browserSession{
+	sess := &browserSession{
+		allocCtx:    allocCtx,
 		allocCancel: allocCancel,
 		ctxCancel:   taskCancel,
 		ctx:         taskCtx,
 		lastUsed:    time.Now(),
 	}
+	t.sessions[sessionID] = sess
+
+	chromedp.ListenBrowser(taskCtx, func(ev interface{}) {
+		e, ok := ev.(*target.EventTargetCreated)
+		if !ok || e.TargetInfo.Type != "page" || e.TargetInfo.OpenerID == "" {
+			return
+		}
+
+		slog.Info("browser new tab detected, switching",
+			slog.String("session_id", sessionID),
+			slog.String("target_id", string(e.TargetInfo.TargetID)),
+		)
+
+		newCtx, newCancel := chromedp.NewContext(allocCtx,
+			chromedp.WithTargetID(e.TargetInfo.TargetID))
+		if err := chromedp.Run(newCtx); err != nil {
+			slog.Warn("browser failed to attach to new tab",
+				slog.String("session_id", sessionID),
+				slog.String("err", err.Error()),
+			)
+			newCancel()
+			return
+		}
+
+		t.mu.Lock()
+		if s, ok := t.sessions[sessionID]; ok {
+			s.ctx = newCtx
+			s.ctxCancel = newCancel
+			s.lastUsed = time.Now()
+		}
+		t.mu.Unlock()
+	})
 
 	slog.Info("browser session created", slog.String("session_id", sessionID))
 
