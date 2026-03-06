@@ -59,9 +59,9 @@ func (a *Adapter) Start(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			dg.Close()
 		case <-a.done:
 		}
+		dg.Close()
 	}()
 
 	return nil
@@ -69,9 +69,6 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 func (a *Adapter) Stop(ctx context.Context) error {
 	close(a.done)
-	if a.session != nil {
-		return a.session.Close()
-	}
 	return nil
 }
 
