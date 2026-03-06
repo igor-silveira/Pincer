@@ -63,7 +63,10 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	if a.client.Store.ID == nil {
 
-		qrChan, _ := a.client.GetQRChannel(ctx)
+		qrChan, err := a.client.GetQRChannel(ctx)
+		if err != nil {
+			return fmt.Errorf("whatsapp: getting QR channel: %w", err)
+		}
 		err = a.client.Connect()
 		if err != nil {
 			return fmt.Errorf("whatsapp: connecting: %w", err)
