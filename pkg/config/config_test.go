@@ -101,6 +101,45 @@ func TestDataDir(t *testing.T) {
 	}
 }
 
+func TestLoadRetryConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "retry.toml")
+
+	content := `
+[agent.retry]
+max_attempts = 5
+strategies = ["tool_swap", "decompose", "rephrase"]
+cooldown_ms = 1000
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Agent.Retry.MaxAttempts != 5 {
+		t.Errorf("MaxAttempts = %d, want 5", cfg.Agent.Retry.MaxAttempts)
+	}
+	if cfg.Agent.Retry.CooldownMS != 1000 {
+		t.Errorf("CooldownMS = %d, want 1000", cfg.Agent.Retry.CooldownMS)
+	}
+	if len(cfg.Agent.Retry.Strategies) != 3 {
+		t.Errorf("Strategies len = %d, want 3", len(cfg.Agent.Retry.Strategies))
+	}
+}
+
+func TestDefaultRetryConfig(t *testing.T) {
+	cfg := Default()
+	if cfg.Agent.Retry.MaxAttempts != 3 {
+		t.Errorf("default MaxAttempts = %d, want 3", cfg.Agent.Retry.MaxAttempts)
+	}
+	if len(cfg.Agent.Retry.Strategies) != 3 {
+		t.Errorf("default Strategies len = %d, want 3", len(cfg.Agent.Retry.Strategies))
+	}
+}
+
 func TestDataDirEnv(t *testing.T) {
 	t.Setenv("PINCER_DATA_DIR", "/tmp/custom-pincer")
 	dir := DataDir()

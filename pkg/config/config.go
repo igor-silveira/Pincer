@@ -33,16 +33,23 @@ type GatewayConfig struct {
 }
 
 type AgentConfig struct {
-	Model             string   `toml:"model"`
-	APIKeyEnv         string   `toml:"api_key_env"`
-	BaseURL           string   `toml:"base_url"`
-	FallbackModels    []string `toml:"fallback_models"`
-	MaxContextTokens  int      `toml:"max_context_tokens"`
-	MaxToolIterations int      `toml:"max_tool_iterations"`
-	ToolApproval      string   `toml:"tool_approval"`
-	SystemPrompt      string   `toml:"system_prompt"`
-	ToolConcurrency   int      `toml:"tool_concurrency"`
-	ToolTimeout       string   `toml:"tool_timeout"`
+	Model             string      `toml:"model"`
+	APIKeyEnv         string      `toml:"api_key_env"`
+	BaseURL           string      `toml:"base_url"`
+	FallbackModels    []string    `toml:"fallback_models"`
+	MaxContextTokens  int         `toml:"max_context_tokens"`
+	MaxToolIterations int         `toml:"max_tool_iterations"`
+	ToolApproval      string      `toml:"tool_approval"`
+	SystemPrompt      string      `toml:"system_prompt"`
+	ToolConcurrency   int         `toml:"tool_concurrency"`
+	ToolTimeout       string      `toml:"tool_timeout"`
+	Retry             RetryConfig `toml:"retry"`
+}
+
+type RetryConfig struct {
+	MaxAttempts int      `toml:"max_attempts"`
+	Strategies  []string `toml:"strategies"`
+	CooldownMS  int      `toml:"cooldown_ms"`
 }
 
 type ChannelConfig struct {
@@ -131,6 +138,11 @@ func Default() *Config {
 			MaxContextTokens:  128000,
 			MaxToolIterations: 25,
 			ToolApproval:      "ask",
+			Retry: RetryConfig{
+				MaxAttempts: 3,
+				Strategies:  []string{"tool_swap", "decompose", "rephrase"},
+				CooldownMS:  500,
+			},
 		},
 		Sandbox: SandboxConfig{
 			Mode:          "process",

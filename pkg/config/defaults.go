@@ -27,6 +27,9 @@ const (
 	ErrorTruncateLen      = 300
 	ToolResultTruncateLen = 200
 
+	DefaultRetryMaxAttempts = 3
+	DefaultRetryCooldownMS  = 500
+
 	DefaultToolConcurrency = 4
 	DefaultToolTimeout     = 2 * time.Minute
 	DefaultRecoveryRetries = 2
