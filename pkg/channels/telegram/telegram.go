@@ -152,28 +152,30 @@ func (a *Adapter) handleCallbackQuery(ctx context.Context, b *bot.Bot, update *m
 		Text:            fmt.Sprintf("Tool %sd", action),
 	})
 
-	if update.CallbackQuery.Message.Message != nil {
-		chatID := update.CallbackQuery.Message.Message.Chat.ID
-		messageID := update.CallbackQuery.Message.Message.ID
-
-		status := "✅ Approved"
-		if !approved {
-			status = "❌ Denied"
-		}
-
-		_, _ = b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
-			ChatID:      chatID,
-			MessageID:   messageID,
-			ReplyMarkup: nil,
-		})
-		_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
-			ChatID:    chatID,
-			MessageID: messageID,
-			Text:      update.CallbackQuery.Message.Message.Text + "\n\n" + status,
-		})
+	if update.CallbackQuery.Message.Message == nil {
+		return
 	}
 
-	sessionID, _ := a.sessions.Lookup(update.CallbackQuery.Message.Message.Chat.ID)
+	chatID := update.CallbackQuery.Message.Message.Chat.ID
+	messageID := update.CallbackQuery.Message.Message.ID
+
+	status := "✅ Approved"
+	if !approved {
+		status = "❌ Denied"
+	}
+
+	_, _ = b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+		ChatID:      chatID,
+		MessageID:   messageID,
+		ReplyMarkup: nil,
+	})
+	_, _ = b.EditMessageText(ctx, &bot.EditMessageTextParams{
+		ChatID:    chatID,
+		MessageID: messageID,
+		Text:      update.CallbackQuery.Message.Message.Text + "\n\n" + status,
+	})
+
+	sessionID, _ := a.sessions.Lookup(chatID)
 	peerID := fmt.Sprintf("%d", update.CallbackQuery.From.ID)
 
 	a.inbound <- channels.InboundMessage{
