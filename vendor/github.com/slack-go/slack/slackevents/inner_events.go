@@ -36,6 +36,11 @@ type AssistantThread struct {
 	ThreadTimeStamp string                 `json:"thread_ts"`
 }
 
+// AssistantThreadActionToken contains the action token for Data Access API queries
+type AssistantThreadActionToken struct {
+	ActionToken string `json:"action_token"`
+}
+
 // AssistantThreadContext is an object that represents the context of an assistant thread.
 type AssistantThreadContext struct {
 	ChannelID    string `json:"channel_id"`
@@ -62,6 +67,9 @@ type AppMentionEvent struct {
 
 	// When the app is mentioned in the edited message
 	Edited *Edited `json:"edited,omitempty"`
+
+	// AssistantThread contains action token for Data Access API queries when app is mentioned
+	AssistantThread *AssistantThreadActionToken `json:"assistant_thread,omitempty"`
 }
 
 // AppHomeOpenedEvent Your Slack app home was opened.
@@ -315,6 +323,14 @@ type MessageEvent struct {
 	BotID    string `json:"bot_id,omitempty"`
 	Username string `json:"username,omitempty"`
 	Icons    *Icon  `json:"icons,omitempty"`
+
+	// AssistantThread contains action token for Data Access API queries in message events
+	AssistantThread *AssistantThreadActionToken `json:"assistant_thread,omitempty"`
+
+	// Huddle-related fields (subtype "huddle_thread")
+	Room            *slack.HuddleRoom `json:"room,omitempty"`
+	NoNotifications bool              `json:"no_notifications,omitempty"`
+	Permalink       string            `json:"permalink,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface for MessageEvent.
@@ -1114,6 +1130,36 @@ type UserStatusChangedEvent struct {
 	EventTS string `json:"event_ts"`
 }
 
+// EntityDetailsRequestedEvent is sent when entity details are requested
+// This event is fired when a user clicks on a Work Object link and Slack requests
+// details about the entity from your app.
+type EntityDetailsRequestedEvent struct {
+	Type         string                            `json:"type"`
+	User         string                            `json:"user"`
+	ExternalRef  EntityDetailsRequestedExternalRef `json:"external_ref"`
+	EntityURL    string                            `json:"entity_url"`
+	Link         EntityDetailsRequestedLink        `json:"link"`
+	AppUnfurlURL string                            `json:"app_unfurl_url"`
+	EventTS      string                            `json:"event_ts"`
+	TriggerID    string                            `json:"trigger_id"`
+	UserLocale   string                            `json:"user_locale"`
+	Channel      string                            `json:"channel,omitempty"`
+	MessageTs    string                            `json:"message_ts,omitempty"`
+	ThreadTs     string                            `json:"thread_ts,omitempty"`
+}
+
+// EntityDetailsRequestedExternalRef represents the external reference in entity_details_requested event
+type EntityDetailsRequestedExternalRef struct {
+	ID   string `json:"id"`
+	Type string `json:"type,omitempty"`
+}
+
+// EntityDetailsRequestedLink represents the link information in entity_details_requested event
+type EntityDetailsRequestedLink struct {
+	URL    string `json:"url"`
+	Domain string `json:"domain"`
+}
+
 type Actor struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -1323,6 +1369,8 @@ const (
 	UserStatusChanged = EventsAPIType("user_status_changed")
 	// WorkflowStepExecute Happens, if a workflow step of your app is invoked
 	WorkflowStepExecute = EventsAPIType("workflow_step_execute")
+	// EntityDetailsRequested is sent when entity details are requested
+	EntityDetailsRequested = EventsAPIType("entity_details_requested")
 )
 
 // EventsAPIInnerEventMapping maps INNER Event API events to their corresponding struct
@@ -1409,4 +1457,5 @@ var EventsAPIInnerEventMapping = map[EventsAPIType]interface{}{
 	UserHuddleChanged:             UserHuddleChangedEvent{},
 	UserProfileChanged:            UserProfileChangedEvent{},
 	UserStatusChanged:             UserStatusChangedEvent{},
+	EntityDetailsRequested:        EntityDetailsRequestedEvent{},
 }

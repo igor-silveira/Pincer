@@ -3,6 +3,7 @@ package WAWebProtobufsE2E;
 option go_package = "go.mau.fi/whatsmeow/proto/waE2E";
 
 import "waAICommon/WAWebProtobufsAICommon.proto";
+import "waAICommonDeprecated/WAWebProtobufsAICommonDeprecated.proto";
 import "waAdv/WAAdv.proto";
 import "waCompanionReg/WACompanionReg.proto";
 import "waMmsRetry/WAMmsRetry.proto";
@@ -78,6 +79,7 @@ message StickerPackMessage {
 		optional string accessibilityLabel = 4;
 		optional bool isLottie = 5;
 		optional string mimetype = 6;
+		optional int32 premium = 7;
 	}
 
 	optional string stickerPackID = 1;
@@ -276,6 +278,18 @@ message ButtonsMessage {
 	optional HeaderType headerType = 10;
 }
 
+message ConditionalRevealMessage {
+	enum ConditionalRevealMessageType {
+		UNKNOWN = 0;
+		SCHEDULED_MESSAGE = 1;
+	}
+
+	optional bytes encPayload = 1;
+	optional bytes encIV = 2;
+	optional ConditionalRevealMessageType conditionalRevealMessageType = 3;
+	optional string revealKeyID = 4;
+}
+
 message SecretEncryptedMessage {
 	enum SecretEncType {
 		UNKNOWN = 0;
@@ -283,6 +297,7 @@ message SecretEncryptedMessage {
 		MESSAGE_EDIT = 2;
 		MESSAGE_SCHEDULE = 3;
 		POLL_EDIT = 4;
+		POLL_ADD_OPTION = 5;
 	}
 
 	optional WACommon.MessageKey targetMessageKey = 1;
@@ -376,6 +391,12 @@ message InteractiveMessage {
 		optional int32 messageVersion = 3;
 	}
 
+	message BloksWidget {
+		optional string uuid = 1;
+		optional string data = 2;
+		optional string type = 3;
+	}
+
 	message Footer {
 		oneof media {
 			AudioMessage audioMessage = 2;
@@ -402,6 +423,7 @@ message InteractiveMessage {
 		optional string title = 1;
 		optional string subtitle = 2;
 		optional bool hasMediaAttachment = 5;
+		optional BloksWidget bloksWidget = 10;
 	}
 
 	oneof interactiveMessage {
@@ -414,6 +436,7 @@ message InteractiveMessage {
 	optional Header header = 1;
 	optional Body body = 2;
 	optional Footer footer = 3;
+	optional BloksWidget bloksWidget = 8;
 	optional ContextInfo contextInfo = 15;
 	optional UrlTrackingMap urlTrackingMap = 16;
 }
@@ -533,6 +556,7 @@ message PaymentInviteMessage {
 	optional ServiceType serviceType = 1;
 	optional int64 expiryTimestamp = 2;
 	optional bool incentiveEligible = 3;
+	optional string referralID = 4;
 }
 
 message HighlyStructuredMessage {
@@ -618,6 +642,19 @@ message PeerDataOperationRequestResponseMessage {
 			ERROR_HOSTED_DEVICE_LOGIN_TIME_NOT_SET = 6;
 		}
 
+		message FlowResponsesCsvBundle {
+			optional string flowID = 1;
+			optional string galaxyFlowDownloadRequestID = 2;
+			optional string fileName = 3;
+			optional string mimetype = 4;
+			optional bytes fileSHA256 = 5;
+			optional bytes mediaKey = 6;
+			optional bytes fileEncSHA256 = 7;
+			optional string directPath = 8;
+			optional int64 mediaKeyTimestamp = 9;
+			optional uint64 fileLength = 10;
+		}
+
 		message HistorySyncChunkRetryResponse {
 			optional HistorySyncType syncType = 1;
 			optional uint32 chunkOrder = 2;
@@ -659,6 +696,9 @@ message PeerDataOperationRequestResponseMessage {
 			message PaymentLinkPreviewMetadata {
 				optional bool isBusinessVerified = 1;
 				optional string providerName = 2;
+				optional string amount = 3;
+				optional string offset = 4;
+				optional string currency = 5;
 			}
 
 			message LinkPreviewHighQualityThumbnail {
@@ -691,6 +731,7 @@ message PeerDataOperationRequestResponseMessage {
 		optional SyncDSnapshotFatalRecoveryResponse syncdSnapshotFatalRecoveryResponse = 8;
 		optional CompanionCanonicalUserNonceFetchResponse companionCanonicalUserNonceFetchRequestResponse = 9;
 		optional HistorySyncChunkRetryResponse historySyncChunkRetryResponse = 10;
+		optional FlowResponsesCsvBundle flowResponsesCsvBundle = 11;
 	}
 
 	optional PeerDataOperationRequestType peerDataOperationRequestType = 1;
@@ -702,11 +743,18 @@ message PeerDataOperationRequestMessage {
 	message GalaxyFlowAction {
 		enum GalaxyFlowActionType {
 			NOTIFY_LAUNCH = 1;
+			DOWNLOAD_RESPONSES = 2;
 		}
 
 		optional GalaxyFlowActionType type = 1;
 		optional string flowID = 2;
 		optional string stanzaID = 3;
+		optional string galaxyFlowDownloadRequestID = 4;
+		optional string agmID = 5;
+	}
+
+	message CompanionCanonicalUserNonceFetchRequest {
+		optional string registrationTraceID = 1;
 	}
 
 	message HistorySyncChunkRetryRequest {
@@ -728,6 +776,7 @@ message PeerDataOperationRequestMessage {
 	message FullHistorySyncOnDemandRequest {
 		optional FullHistorySyncOnDemandRequestMetadata requestMetadata = 1;
 		optional WACompanionReg.DeviceProps.HistorySyncConfig historySyncConfig = 2;
+		optional FullHistorySyncOnDemandConfig fullHistorySyncOnDemandConfig = 3;
 	}
 
 	message HistorySyncOnDemandRequest {
@@ -757,15 +806,22 @@ message PeerDataOperationRequestMessage {
 	optional SyncDCollectionFatalRecoveryRequest syncdCollectionFatalRecoveryRequest = 7;
 	optional HistorySyncChunkRetryRequest historySyncChunkRetryRequest = 8;
 	optional GalaxyFlowAction galaxyFlowAction = 9;
+	optional CompanionCanonicalUserNonceFetchRequest companionCanonicalUserNonceFetchRequest = 10;
 }
 
 message RequestWelcomeMessageMetadata {
+	enum WelcomeTrigger {
+		CHAT_OPEN = 0;
+		COMPANION_PAIRING = 1;
+	}
+
 	enum LocalChatState {
 		EMPTY = 0;
 		NON_EMPTY = 1;
 	}
 
 	optional LocalChatState localChatState = 1;
+	optional WelcomeTrigger welcomeTrigger = 2;
 }
 
 message ProtocolMessage {
@@ -797,6 +853,7 @@ message ProtocolMessage {
 		AI_QUERY_FANOUT = 29;
 		GROUP_MEMBER_LABEL_CHANGE = 30;
 		AI_MEDIA_COLLECTION_MESSAGE = 31;
+		MESSAGE_UNSCHEDULE = 32;
 	}
 
 	optional WACommon.MessageKey key = 1;
@@ -824,6 +881,7 @@ message ProtocolMessage {
 	optional AIQueryFanout aiQueryFanout = 26;
 	optional MemberLabel memberLabel = 27;
 	optional WAWebProtobufsAICommon.AIMediaCollectionMessage aiMediaCollectionMessage = 28;
+	optional uint32 afterReadDuration = 29;
 }
 
 message CloudAPIThreadControlNotification {
@@ -1297,6 +1355,7 @@ message ContextInfo {
 	optional bool isSpoiler = 73;
 	optional MediaDomainInfo mediaDomainInfo = 74;
 	optional PartiallySelectedContent partiallySelectedContent = 75;
+	optional uint32 afterReadDuration = 76;
 }
 
 message MessageAssociation {
@@ -1321,6 +1380,7 @@ message MessageAssociation {
 		STATUS_ADD_YOURS_DIWALI = 17;
 		STATUS_REACTION = 18;
 		HEVC_VIDEO_DUAL_UPLOAD = 19;
+		POLL_ADD_OPTION = 20;
 	}
 
 	optional AssociationType associationType = 1;
@@ -1337,6 +1397,7 @@ message ThreadID {
 
 	optional ThreadType threadType = 1;
 	optional WACommon.MessageKey threadKey = 2;
+	optional string sourceChatJID = 3;
 }
 
 message MessageContextInfo {
@@ -1582,7 +1643,9 @@ message Message {
 	optional FutureProofMessage newsletterAdminProfileMessage = 116;
 	optional FutureProofMessage newsletterAdminProfileMessageV2 = 117;
 	optional FutureProofMessage spoilerMessage = 118;
-	optional FutureProofMessage pollCreationMessageV6 = 119;
+	optional PollCreationMessage pollCreationMessageV6 = 119;
+	optional ConditionalRevealMessage conditionalRevealMessage = 120;
+	optional PollAddOptionMessage pollAddOptionMessage = 121;
 }
 
 message AlbumMessage {
@@ -1680,6 +1743,11 @@ message PollResultSnapshotMessage {
 	optional PollType pollType = 4;
 }
 
+message PollAddOptionMessage {
+	optional WACommon.MessageKey pollCreationMessageKey = 1;
+	optional PollCreationMessage.Option addOption = 2;
+}
+
 message PollVoteMessage {
 	repeated bytes selectedOptions = 1;
 }
@@ -1715,6 +1783,7 @@ message PollCreationMessage {
 	optional Option correctAnswer = 8;
 	optional int64 endTime = 9;
 	optional bool hideParticipantName = 10;
+	optional bool allowAddOption = 11;
 }
 
 message StickerSyncRMRMessage {
@@ -1913,8 +1982,15 @@ message InitialSecurityNotificationSettingSync {
 	optional bool securityNotificationEnabled = 1;
 }
 
+message FullHistorySyncOnDemandConfig {
+	optional uint64 historyFromTimestamp = 1;
+	optional uint32 historyDurationDays = 2;
+}
+
 message FullHistorySyncOnDemandRequestMetadata {
 	optional string requestID = 1;
+	optional string businessProduct = 2;
+	optional bytes opaqueClientData = 3;
 }
 
 message AppStateFatalExceptionNotification {
@@ -1989,6 +2065,7 @@ message Call {
 	optional string nativeFlowCallButtonPayload = 8;
 	optional string deeplinkPayload = 9;
 	optional MessageContextInfo messageContextInfo = 10;
+	optional uint32 callEntryPoint = 11;
 }
 
 message AudioMessage {
@@ -2224,8 +2301,8 @@ message MemberLabel {
 }
 
 message AIRichResponseMessage {
-	optional WAWebProtobufsAICommon.AIRichResponseMessageType messageType = 1;
-	repeated WAWebProtobufsAICommon.AIRichResponseSubMessage submessages = 2;
+	optional WAWebProtobufsAICommonDeprecated.AIRichResponseMessageType messageType = 1;
+	repeated WAWebProtobufsAICommonDeprecated.AIRichResponseSubMessage submessages = 2;
 	optional WAWebProtobufsAICommon.AIRichResponseUnifiedResponse unifiedResponse = 3;
 	optional ContextInfo contextInfo = 4;
 }
