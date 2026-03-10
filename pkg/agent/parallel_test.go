@@ -191,7 +191,6 @@ func TestRunTurn_EphemeralErrorNotPersisted(t *testing.T) {
 		responses: [][]llm.ChatEvent{},
 	}
 
-	callCount := 0
 	provider := &errorThenSuccessProvider{
 		errorCount: 1,
 		err:        fmt.Errorf("API overloaded"),
@@ -199,7 +198,7 @@ func TestRunTurn_EphemeralErrorNotPersisted(t *testing.T) {
 			{Type: llm.EventToken, Token: "recovered"},
 			{Type: llm.EventDone, Usage: &llm.Usage{}},
 		},
-		calls: &callCount,
+		calls: new(0),
 	}
 	_ = fp
 
@@ -315,10 +314,10 @@ func (cs *concurrencySandbox) Exec(_ context.Context, _ sandbox.Command, _ sandb
 }
 
 type errorThenSuccessProvider struct {
-	errorCount      int
-	err             error
-	successEvents   []llm.ChatEvent
-	calls           *int
+	errorCount       int
+	err              error
+	successEvents    []llm.ChatEvent
+	calls            *int
 	gotSystemPrompts []string
 }
 
@@ -344,10 +343,10 @@ func (p *errorThenSuccessProvider) Chat(_ context.Context, req llm.ChatRequest) 
 }
 
 type streamErrorThenSuccessProvider struct {
-	errorCount    int
-	streamErr     error
-	successEvents []llm.ChatEvent
-	calls         int
+	errorCount       int
+	streamErr        error
+	successEvents    []llm.ChatEvent
+	calls            int
 	gotSystemPrompts []string
 }
 

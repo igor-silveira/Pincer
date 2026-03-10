@@ -108,9 +108,8 @@ func (a *Adapter) Send(ctx context.Context, msg channels.OutboundMessage) error 
 	formatted := markdownToWhatsApp(msg.Content)
 	chunks := channels.SplitMessage(formatted, 65536)
 	for _, chunk := range chunks {
-		text := chunk
 		if _, err := a.client.SendMessage(ctx, jid, &waE2E.Message{
-			Conversation: &text,
+			Conversation: new(chunk),
 		}); err != nil {
 			return err
 		}

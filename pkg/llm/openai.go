@@ -54,14 +54,14 @@ func (o *OpenAIProvider) Models() []ModelInfo {
 }
 
 type openaiRequest struct {
-	Model          string          `json:"model"`
-	Messages       []openaiMessage `json:"messages"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	Temperature    *float64        `json:"temperature,omitempty"`
-	Tools          []openaiTool    `json:"tools,omitempty"`
-	Stream         bool            `json:"stream"`
-	ToolChoice     interface{}     `json:"tool_choice,omitempty"`
-	ParallelCalls  *bool           `json:"parallel_tool_calls,omitempty"`
+	Model         string          `json:"model"`
+	Messages      []openaiMessage `json:"messages"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
+	Temperature   *float64        `json:"temperature,omitempty"`
+	Tools         []openaiTool    `json:"tools,omitempty"`
+	Stream        bool            `json:"stream"`
+	ToolChoice    interface{}     `json:"tool_choice,omitempty"`
+	ParallelCalls *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type openaiMessage struct {
@@ -126,8 +126,7 @@ func (o *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (<-chan Chat
 			}
 		}
 		if req.ToolChoice.DisableParallelToolUse != nil && *req.ToolChoice.DisableParallelToolUse {
-			f := false
-			apiReq.ParallelCalls = &f
+			apiReq.ParallelCalls = new(false)
 		}
 	}
 

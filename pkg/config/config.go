@@ -33,17 +33,17 @@ type GatewayConfig struct {
 }
 
 type AgentConfig struct {
-	Model             string      `toml:"model"`
-	APIKeyEnv         string      `toml:"api_key_env"`
-	BaseURL           string      `toml:"base_url"`
-	FallbackModels    []string    `toml:"fallback_models"`
-	MaxContextTokens  int         `toml:"max_context_tokens"`
-	MaxToolIterations int         `toml:"max_tool_iterations"`
-	ToolApproval      string      `toml:"tool_approval"`
-	SystemPrompt      string      `toml:"system_prompt"`
-	ToolConcurrency   int         `toml:"tool_concurrency"`
-	ToolTimeout       string      `toml:"tool_timeout"`
-	AuthHeader        string      `toml:"auth_header"`
+	Model             string             `toml:"model"`
+	APIKeyEnv         string             `toml:"api_key_env"`
+	BaseURL           string             `toml:"base_url"`
+	FallbackModels    []string           `toml:"fallback_models"`
+	MaxContextTokens  int                `toml:"max_context_tokens"`
+	MaxToolIterations int                `toml:"max_tool_iterations"`
+	ToolApproval      string             `toml:"tool_approval"`
+	SystemPrompt      string             `toml:"system_prompt"`
+	ToolConcurrency   int                `toml:"tool_concurrency"`
+	ToolTimeout       string             `toml:"tool_timeout"`
+	AuthHeader        string             `toml:"auth_header"`
 	Retry             RetryConfig        `toml:"retry"`
 	Checkpoint        CheckpointConfig   `toml:"checkpoint"`
 	Verification      VerificationConfig `toml:"verification"`
@@ -239,8 +239,7 @@ func Current() *Config {
 	if current == nil {
 		return Default()
 	}
-	cp := *current
-	return &cp
+	return new(*current)
 }
 
 func DataDir() string {

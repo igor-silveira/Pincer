@@ -11,7 +11,7 @@ import (
 type RecoveryAction int
 
 const (
-	ActionSkip    RecoveryAction = iota
+	ActionSkip RecoveryAction = iota
 	ActionRetry
 	ActionReplan
 )
@@ -35,8 +35,7 @@ type PermanentError struct {
 func (e *PermanentError) Error() string { return e.Msg }
 
 func ClassifyError(err error) ErrorKind {
-	var pe *PermanentError
-	if errors.As(err, &pe) {
+	if _, ok := errors.AsType[*PermanentError](err); ok {
 		return Permanent
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

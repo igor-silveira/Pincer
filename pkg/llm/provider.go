@@ -60,7 +60,7 @@ type ToolResult struct {
 }
 
 func (tr *ToolResult) ErrorKind() ToolErrorKind     { return tr.errorKind }
-func (tr *ToolResult) SetErrorKind(k ToolErrorKind)  { tr.errorKind = k }
+func (tr *ToolResult) SetErrorKind(k ToolErrorKind) { tr.errorKind = k }
 
 type ChatMessage struct {
 	Role        string       `json:"role"`
@@ -79,9 +79,9 @@ const (
 )
 
 type ToolChoice struct {
-	Type                    ToolChoiceType `json:"type"`
-	Name                    string         `json:"name,omitempty"`
-	DisableParallelToolUse  *bool          `json:"disable_parallel_tool_use,omitempty"`
+	Type                   ToolChoiceType `json:"type"`
+	Name                   string         `json:"name,omitempty"`
+	DisableParallelToolUse *bool          `json:"disable_parallel_tool_use,omitempty"`
 }
 
 type ChatRequest struct {
@@ -147,8 +147,7 @@ func (e *APIError) IsRetryable() bool {
 }
 
 func IsRetryable(err error) (time.Duration, bool) {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.IsRetryable() {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.IsRetryable() {
 		return apiErr.RetryAfter, true
 	}
 	return 0, false
