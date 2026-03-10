@@ -12,7 +12,25 @@ model = "claude-sonnet-4-20250514"
 max_context_tokens = 128000
 max_tool_iterations = 25
 tool_approval = "ask"
+# tool_concurrency = 1
+# tool_timeout = "30s"
 # system_prompt = ""
+
+[agent.retry]
+# max_attempts = 3
+# strategies = ["retry", "simplify"]
+# cooldown_ms = 1000
+
+[agent.checkpoint]
+# enabled = false
+# token_threshold = 80000
+# retention_hours = 24
+
+[agent.verification]
+# enabled = false
+# confidence_threshold = 0.8
+# max_attempts = 3
+# gates = ["tool_call", "final_answer"]
 
 [sandbox]
 mode = "process"
@@ -28,7 +46,7 @@ max_versions = 100
 
 [store]
 driver = "sqlite"
-#dsn = ".pincer/pincer.db"
+# dsn = ".pincer/pincer.db"
 
 [log]
 level = "info"
@@ -41,6 +59,7 @@ enabled = true
 name = "playwright"
 command = "npx"
 args = ["@playwright/mcp@latest"]
+# url = ""
 # env = { KEY = "value" }
 # enabled = true
 
@@ -58,28 +77,48 @@ args = ["@playwright/mcp@latest"]
 [soul]
 # path = "soul.toml"
 
+[browser]
+# enabled = false
+# headless = false
+# idle_timeout = "5m"
+
 # Channel adapters. Uncomment and configure as needed.
-#
+
 [channels.telegram]
 enabled = true
 token_env = "TELEGRAM_BOT_TOKEN"
-#
+# token = ""
+# allow_list = []
+
 # [channels.discord]
 # enabled = true
 # token_env = "DISCORD_BOT_TOKEN"
-#
+# token = ""
+# allow_list = []
+
 # [channels.slack]
 # enabled = true
 # token_env = "SLACK_BOT_TOKEN"
-#
+# token = ""
+# allow_list = []
+
 # [channels.whatsapp]
 # enabled = true
-#
+# token_env = ""
+# token = ""
+# allow_list = []
+
 # [channels.matrix]
 # enabled = true
-#
+# token_env = ""
+# token = ""
+# allow_list = []
+
 # [channels.webchat]
 # enabled = true
+# token_env = ""
+# token = ""
+# allow_list = []
 
 [a2a]
 # enabled = false
