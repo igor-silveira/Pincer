@@ -11,12 +11,13 @@ import (
 )
 
 type Soul struct {
-	Identity    Identity     `toml:"identity"`
-	Values      Values       `toml:"values"`
-	Tone        Tone         `toml:"tone"`
-	Boundaries  Boundaries   `toml:"boundaries"`
-	Expertise   Expertise    `toml:"expertise"`
-	MemorySeeds []MemorySeed `toml:"memory_seeds"`
+	Identity     Identity     `toml:"identity"`
+	Values       Values       `toml:"values"`
+	Tone         Tone         `toml:"tone"`
+	Boundaries   Boundaries   `toml:"boundaries"`
+	Expertise    Expertise    `toml:"expertise"`
+	Instructions Instructions `toml:"instructions"`
+	MemorySeeds  []MemorySeed `toml:"memory_seeds"`
 }
 
 type Identity struct {
@@ -44,6 +45,10 @@ type Boundaries struct {
 
 type Expertise struct {
 	Domains []string `toml:"domains"`
+}
+
+type Instructions struct {
+	Rules []string `toml:"rules"`
 }
 
 type MemorySeed struct {
@@ -160,6 +165,13 @@ func (s *Soul) Render() string {
 		}
 	}
 
+	if len(s.Instructions.Rules) > 0 {
+		b.WriteString("\n## Instructions\n")
+		for _, r := range s.Instructions.Rules {
+			fmt.Fprintf(&b, "- %s\n", r)
+		}
+	}
+
 	b.WriteString(operationalGuidelines)
 	b.WriteByte('\n')
 
@@ -218,6 +230,15 @@ func (s *Soul) Section(name string) string {
 		return strings.Join(parts, "\n")
 	case "expertise":
 		return fmt.Sprintf("Domains: %s", strings.Join(s.Expertise.Domains, ", "))
+	case "instructions":
+		if len(s.Instructions.Rules) == 0 {
+			return "(no instructions defined)"
+		}
+		parts := make([]string, len(s.Instructions.Rules))
+		for i, r := range s.Instructions.Rules {
+			parts[i] = fmt.Sprintf("- %s", r)
+		}
+		return strings.Join(parts, "\n")
 	default:
 		return s.Render()
 	}

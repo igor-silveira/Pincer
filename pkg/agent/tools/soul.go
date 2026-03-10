@@ -26,7 +26,7 @@ func (t *SoulTool) Definition() llm.ToolDefinition {
 			"properties": {
 				"section": {
 					"type": "string",
-					"enum": ["identity", "values", "tone", "boundaries", "expertise", "all"],
+					"enum": ["identity", "values", "tone", "boundaries", "expertise", "instructions", "all"],
 					"description": "Which section of the soul to retrieve (defaults to all)"
 				}
 			}
